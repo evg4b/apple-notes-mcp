@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.102"
+serde = { version = "1.0.228", features = ["derive"] }
+rmcp = { version = "1.4.0", features = ["transport-io"] }
+tokio = { version = "1.52.0", features = ["macros", "rt-multi-thread"] }
+objc2 = "0.6.4"
+objc2-foundation = "0.3.2"
