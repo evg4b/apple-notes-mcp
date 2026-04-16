@@ -1,5 +1,6 @@
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{schemars, tool, tool_router, Json};
+use tracing::{info, warn};
 
 use crate::notes::{
     create_note, delete_note, get_all_attachments, get_all_notes, get_note_attachments_by_title,
@@ -100,32 +101,50 @@ impl AppleNotesMCP {
 
     #[tool(description = "Return the titles of all notes (fast — does not fetch body content).")]
     pub fn list_notes(&self, _p: Parameters<EmptyRequest>) -> Json<NoteTitlesResponse> {
-        Json(NoteTitlesResponse {
-            titles: list_notes().unwrap_or_default(),
-        })
+        info!(tool = "list_notes");
+        let titles = list_notes()
+            .inspect_err(|e| warn!(error = %e, "list_notes failed"))
+            .unwrap_or_default();
+        Json(NoteTitlesResponse { titles })
     }
 
     #[tool(description = "Return full metadata and content (HTML + plaintext) for every note, \
                           including folder, account, shared status and password-protection flag.")]
     pub fn get_all_notes(&self, _p: Parameters<EmptyRequest>) -> Json<NotesResponse> {
-        Json(NotesResponse { notes: get_all_notes().unwrap_or_default() })
+        info!(tool = "get_all_notes");
+        let notes = get_all_notes()
+            .inspect_err(|e| warn!(error = %e, "get_all_notes failed"))
+            .unwrap_or_default();
+        Json(NotesResponse { notes })
     }
 
     #[tool(description = "Return full metadata and content for a single note looked up by title. \
                           note is null when no note with that title exists.")]
     pub fn get_note(&self, p: Parameters<TitleRequest>) -> Json<NoteResponse> {
-        Json(NoteResponse { note: get_note_by_title(&p.0.title).unwrap_or(None) })
+        info!(tool = "get_note", title = %p.0.title);
+        let note = get_note_by_title(&p.0.title)
+            .inspect_err(|e| warn!(error = %e, "get_note failed"))
+            .unwrap_or(None);
+        Json(NoteResponse { note })
     }
 
     #[tool(description = "Return all notes inside a specific folder (matched by name).")]
     pub fn get_notes_in_folder(&self, p: Parameters<FolderRequest>) -> Json<NotesResponse> {
-        Json(NotesResponse { notes: get_notes_in_folder(&p.0.folder).unwrap_or_default() })
+        info!(tool = "get_notes_in_folder", folder = %p.0.folder);
+        let notes = get_notes_in_folder(&p.0.folder)
+            .inspect_err(|e| warn!(error = %e, "get_notes_in_folder failed"))
+            .unwrap_or_default();
+        Json(NotesResponse { notes })
     }
 
     #[tool(description = "Return all notes belonging to a specific account \
                           (e.g. \"iCloud\" or \"On My Mac\").")]
     pub fn get_notes_in_account(&self, p: Parameters<AccountRequest>) -> Json<NotesResponse> {
-        Json(NotesResponse { notes: get_notes_in_account(&p.0.account).unwrap_or_default() })
+        info!(tool = "get_notes_in_account", account = %p.0.account);
+        let notes = get_notes_in_account(&p.0.account)
+            .inspect_err(|e| warn!(error = %e, "get_notes_in_account failed"))
+            .unwrap_or_default();
+        Json(NotesResponse { notes })
     }
 
     // ── Read: folders & accounts ──────────────────────────────────────────────
@@ -133,33 +152,51 @@ impl AppleNotesMCP {
     #[tool(description = "Return all folders across all accounts, including subfolders, \
                           with their account and parent-folder context.")]
     pub fn list_folders(&self, _p: Parameters<EmptyRequest>) -> Json<FoldersResponse> {
-        Json(FoldersResponse { folders: list_folders().unwrap_or_default() })
+        info!(tool = "list_folders");
+        let folders = list_folders()
+            .inspect_err(|e| warn!(error = %e, "list_folders failed"))
+            .unwrap_or_default();
+        Json(FoldersResponse { folders })
     }
 
     #[tool(description = "Return all subfolders of a specific folder (matched by name), \
                           including nested subfolders.")]
     pub fn get_subfolders(&self, p: Parameters<FolderRequest>) -> Json<FoldersResponse> {
-        Json(FoldersResponse { folders: get_subfolders(&p.0.folder).unwrap_or_default() })
+        info!(tool = "get_subfolders", folder = %p.0.folder);
+        let folders = get_subfolders(&p.0.folder)
+            .inspect_err(|e| warn!(error = %e, "get_subfolders failed"))
+            .unwrap_or_default();
+        Json(FoldersResponse { folders })
     }
 
     #[tool(description = "Return all accounts configured in Apple Notes \
                           (iCloud, On My Mac, Exchange, etc.).")]
     pub fn list_accounts(&self, _p: Parameters<EmptyRequest>) -> Json<AccountsResponse> {
-        Json(AccountsResponse { accounts: list_accounts().unwrap_or_default() })
+        info!(tool = "list_accounts");
+        let accounts = list_accounts()
+            .inspect_err(|e| warn!(error = %e, "list_accounts failed"))
+            .unwrap_or_default();
+        Json(AccountsResponse { accounts })
     }
 
     // ── Read: attachments ─────────────────────────────────────────────────────
 
     #[tool(description = "Return all attachments embedded in a specific note (matched by title).")]
     pub fn get_note_attachments(&self, p: Parameters<TitleRequest>) -> Json<AttachmentsResponse> {
-        Json(AttachmentsResponse {
-            attachments: get_note_attachments_by_title(&p.0.title).unwrap_or_default(),
-        })
+        info!(tool = "get_note_attachments", title = %p.0.title);
+        let attachments = get_note_attachments_by_title(&p.0.title)
+            .inspect_err(|e| warn!(error = %e, "get_note_attachments failed"))
+            .unwrap_or_default();
+        Json(AttachmentsResponse { attachments })
     }
 
     #[tool(description = "Return every attachment from every note across all accounts.")]
     pub fn get_all_attachments(&self, _p: Parameters<EmptyRequest>) -> Json<AttachmentsResponse> {
-        Json(AttachmentsResponse { attachments: get_all_attachments().unwrap_or_default() })
+        info!(tool = "get_all_attachments");
+        let attachments = get_all_attachments()
+            .inspect_err(|e| warn!(error = %e, "get_all_attachments failed"))
+            .unwrap_or_default();
+        Json(AttachmentsResponse { attachments })
     }
 
     // ── Write ─────────────────────────────────────────────────────────────────
@@ -167,29 +204,34 @@ impl AppleNotesMCP {
     #[tool(description = "Create a new note with the given title and HTML body \
                           in the default Notes folder.")]
     pub fn create_note(&self, p: Parameters<CreateNoteRequest>) -> Json<WriteResponse> {
-        Json(WriteResponse {
-            success: create_note(&p.0.title, &p.0.content).is_ok(),
-        })
+        info!(tool = "create_note", title = %p.0.title);
+        let success = create_note(&p.0.title, &p.0.content)
+            .inspect_err(|e| warn!(error = %e, "create_note failed"))
+            .is_ok();
+        Json(WriteResponse { success })
     }
 
     #[tool(description = "Update the title and/or body of an existing note. \
                           Omit new_title or new_content to leave that field unchanged.")]
     pub fn update_note(&self, p: Parameters<UpdateNoteRequest>) -> Json<WriteResponse> {
-        Json(WriteResponse {
-            success: update_note(
-                &p.0.title,
-                p.0.new_title.as_deref(),
-                p.0.new_content.as_deref(),
-            )
-            .unwrap_or(false),
-        })
+        info!(tool = "update_note", title = %p.0.title, new_title = ?p.0.new_title);
+        let success = update_note(
+            &p.0.title,
+            p.0.new_title.as_deref(),
+            p.0.new_content.as_deref(),
+        )
+        .inspect_err(|e| warn!(error = %e, "update_note failed"))
+        .unwrap_or(false);
+        Json(WriteResponse { success })
     }
 
     #[tool(description = "Permanently delete a note by title. \
                           Returns success=false when no note with that title exists.")]
     pub fn delete_note(&self, p: Parameters<TitleRequest>) -> Json<WriteResponse> {
-        Json(WriteResponse {
-            success: delete_note(&p.0.title).unwrap_or(false),
-        })
+        info!(tool = "delete_note", title = %p.0.title);
+        let success = delete_note(&p.0.title)
+            .inspect_err(|e| warn!(error = %e, "delete_note failed"))
+            .unwrap_or(false);
+        Json(WriteResponse { success })
     }
 }

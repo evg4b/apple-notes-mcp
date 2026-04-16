@@ -6,6 +6,7 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::msg_send;
 use objc2_foundation::NSString;
+use tracing::{debug, error, instrument, trace};
 
 use super::bridge::{
     app_accounts, app_as_any, app_notes, attachment_info, collect_folders,
@@ -16,37 +17,52 @@ use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
 use super::bridge::SBApplication;
 
 /// Obtain a live ScriptingBridge proxy to Notes.app.
+#[instrument]
 fn notes_app() -> Result<Retained<SBApplication>> {
     use objc2::ClassType;
+    trace!("connecting to Notes.app via ScriptingBridge");
     let bundle_id = NSString::from_str("com.apple.Notes");
     let app: Option<Retained<SBApplication>> = unsafe {
         msg_send![SBApplication::class(), applicationWithBundleIdentifier: &*bundle_id]
     };
-    app.ok_or_else(|| anyhow!("Cannot connect to Apple Notes via ScriptingBridge"))
+    match app {
+        Some(a) => {
+            trace!("ScriptingBridge connection established");
+            Ok(a)
+        }
+        None => {
+            error!("ScriptingBridge returned nil for com.apple.Notes");
+            Err(anyhow!("Cannot connect to Apple Notes via ScriptingBridge"))
+        }
+    }
 }
 
 // ─── Read: accounts ───────────────────────────────────────────────────────────
 
 /// Return all accounts configured in Apple Notes.
+#[instrument]
 pub fn list_accounts() -> Result<Vec<AccountInfo>> {
     let app = notes_app()?;
-    unsafe {
+    let result = unsafe {
         let arr = app_accounts(app_as_any(&app));
         let count = sb_count(&arr);
+        debug!(count, "found accounts");
         let mut out = Vec::with_capacity(count);
         for i in 0..count {
             out.push(account_info(&sb_at(&arr, i)));
         }
-        Ok(out)
-    }
+        out
+    };
+    Ok(result)
 }
 
 // ─── Read: folders ────────────────────────────────────────────────────────────
 
 /// Return all folders across all accounts (including subfolders).
+#[instrument]
 pub fn list_folders() -> Result<Vec<FolderInfo>> {
     let app = notes_app()?;
-    unsafe {
+    let result = unsafe {
         let accounts_arr = app_accounts(app_as_any(&app));
         let account_count = sb_count(&accounts_arr);
         let mut out = Vec::new();
@@ -54,13 +70,18 @@ pub fn list_folders() -> Result<Vec<FolderInfo>> {
             let account = sb_at(&accounts_arr, i);
             let account_name = kvc_string(&account, "name");
             let folders_arr = obj_folders(&account);
+            let before = out.len();
             collect_folders(&folders_arr, &account_name, &account_name, &mut out);
+            debug!(account = %account_name, folders = out.len() - before, "collected folders");
         }
-        Ok(out)
-    }
+        out
+    };
+    debug!(total = result.len(), "list_folders complete");
+    Ok(result)
 }
 
 /// Return all subfolders of a given folder (matched by name), including nested ones.
+#[instrument]
 pub fn get_subfolders(folder_name: &str) -> Result<Vec<FolderInfo>> {
     let app = notes_app()?;
     unsafe {
@@ -77,10 +98,12 @@ pub fn get_subfolders(folder_name: &str) -> Result<Vec<FolderInfo>> {
                     let mut out = Vec::new();
                     let sub_arr = obj_folders(&folder);
                     collect_folders(&sub_arr, &account_name, folder_name, &mut out);
+                    debug!(count = out.len(), "found subfolders");
                     return Ok(out);
                 }
             }
         }
+        debug!("folder not found");
         Ok(vec![])
     }
 }
@@ -88,24 +111,28 @@ pub fn get_subfolders(folder_name: &str) -> Result<Vec<FolderInfo>> {
 // ─── Read: notes ──────────────────────────────────────────────────────────────
 
 /// Return just the titles of all notes (fast — avoids fetching body/plaintext).
+#[instrument]
 pub fn list_notes() -> Result<Vec<String>> {
     let app = notes_app()?;
-    unsafe {
+    let result = unsafe {
         let arr = app_notes(app_as_any(&app));
         let count = sb_count(&arr);
+        debug!(count, "fetching note titles");
         let mut out = Vec::with_capacity(count);
         for i in 0..count {
             out.push(kvc_string(&sb_at(&arr, i), "name"));
         }
-        Ok(out)
-    }
+        out
+    };
+    Ok(result)
 }
 
 /// Return full metadata + content for every note.
 /// Iterates accounts → folders → notes to resolve folder/account context.
+#[instrument]
 pub fn get_all_notes() -> Result<Vec<NoteInfo>> {
     let app = notes_app()?;
-    unsafe {
+    let result = unsafe {
         let accounts_arr = app_accounts(app_as_any(&app));
         let account_count = sb_count(&accounts_arr);
         let mut out = Vec::new();
@@ -113,13 +140,18 @@ pub fn get_all_notes() -> Result<Vec<NoteInfo>> {
             let account = sb_at(&accounts_arr, i);
             let account_name = kvc_string(&account, "name");
             let folders_arr = obj_folders(&account);
+            let before = out.len();
             collect_notes_in_folders(&folders_arr, &account_name, &mut out);
+            debug!(account = %account_name, notes = out.len() - before, "collected notes");
         }
-        Ok(out)
-    }
+        out
+    };
+    debug!(total = result.len(), "get_all_notes complete");
+    Ok(result)
 }
 
 /// Return the full details of a note by title, or `None` if not found.
+#[instrument]
 pub fn get_note_by_title(title: &str) -> Result<Option<NoteInfo>> {
     let app = notes_app()?;
     unsafe {
@@ -138,16 +170,19 @@ pub fn get_note_by_title(title: &str) -> Result<Option<NoteInfo>> {
                 for k in 0..note_count {
                     let note = sb_at(&notes_arr, k);
                     if kvc_string(&note, "name") == title {
+                        debug!(folder = %folder_name, account = %account_name, "note found");
                         return Ok(Some(note_info(&note, &folder_name, &account_name)));
                     }
                 }
             }
         }
+        debug!("note not found");
         Ok(None)
     }
 }
 
 /// Return all notes inside a specific folder (matched by folder name).
+#[instrument]
 pub fn get_notes_in_folder(folder_name: &str) -> Result<Vec<NoteInfo>> {
     let app = notes_app()?;
     unsafe {
@@ -163,15 +198,18 @@ pub fn get_notes_in_folder(folder_name: &str) -> Result<Vec<NoteInfo>> {
                 if kvc_string(&folder, "name") == folder_name {
                     let mut out = Vec::new();
                     collect_notes_in_folder(&folder, folder_name, &account_name, &mut out);
+                    debug!(count = out.len(), account = %account_name, "found notes in folder");
                     return Ok(out);
                 }
             }
         }
+        debug!("folder not found");
         Ok(vec![])
     }
 }
 
 /// Return all notes inside a specific account (matched by account name).
+#[instrument]
 pub fn get_notes_in_account(account_name: &str) -> Result<Vec<NoteInfo>> {
     let app = notes_app()?;
     unsafe {
@@ -183,9 +221,11 @@ pub fn get_notes_in_account(account_name: &str) -> Result<Vec<NoteInfo>> {
                 let mut out = Vec::new();
                 let folders_arr = obj_folders(&account);
                 collect_notes_in_folders(&folders_arr, account_name, &mut out);
+                debug!(count = out.len(), "found notes in account");
                 return Ok(out);
             }
         }
+        debug!("account not found");
         Ok(vec![])
     }
 }
@@ -193,6 +233,7 @@ pub fn get_notes_in_account(account_name: &str) -> Result<Vec<NoteInfo>> {
 // ─── Read: attachments ────────────────────────────────────────────────────────
 
 /// Return all attachments for a note (matched by title).
+#[instrument]
 pub fn get_note_attachments_by_title(title: &str) -> Result<Vec<AttachmentInfo>> {
     let app = notes_app()?;
     unsafe {
@@ -204,6 +245,7 @@ pub fn get_note_attachments_by_title(title: &str) -> Result<Vec<AttachmentInfo>>
             if note_title == title {
                 let att_arr = note_attachments(&note);
                 let att_count = sb_count(&att_arr);
+                debug!(count = att_count, "found attachments");
                 let mut out = Vec::with_capacity(att_count);
                 for j in 0..att_count {
                     out.push(attachment_info(&sb_at(&att_arr, j), &note_title));
@@ -211,11 +253,13 @@ pub fn get_note_attachments_by_title(title: &str) -> Result<Vec<AttachmentInfo>>
                 return Ok(out);
             }
         }
+        debug!("note not found");
         Ok(vec![])
     }
 }
 
 /// Return every attachment from every note.
+#[instrument]
 pub fn get_all_attachments() -> Result<Vec<AttachmentInfo>> {
     let app = notes_app()?;
     unsafe {
@@ -231,6 +275,7 @@ pub fn get_all_attachments() -> Result<Vec<AttachmentInfo>> {
                 out.push(attachment_info(&sb_at(&att_arr, j), &note_title));
             }
         }
+        debug!(total = out.len(), "get_all_attachments complete");
         Ok(out)
     }
 }
@@ -238,6 +283,7 @@ pub fn get_all_attachments() -> Result<Vec<AttachmentInfo>> {
 // ─── Write ────────────────────────────────────────────────────────────────────
 
 /// Create a new note with the given title and HTML body in the default folder.
+#[instrument(skip(content))]
 pub fn create_note(title: &str, content: &str) -> Result<()> {
     let app = notes_app()?;
     unsafe {
@@ -262,12 +308,14 @@ pub fn create_note(title: &str, content: &str) -> Result<()> {
         // the static method table — same issue as the collection accessors above.
         kvc_set(&note, "name", title);
         kvc_set(&note, "body", content);
+        debug!("note created");
     }
     Ok(())
 }
 
 /// Update title and/or body of an existing note (looked up by current title).
 /// Returns `false` if no note with `title` exists.
+#[instrument(skip(content))]
 pub fn update_note(title: &str, new_title: Option<&str>, content: Option<&str>) -> Result<bool> {
     let app = notes_app()?;
     unsafe {
@@ -282,15 +330,18 @@ pub fn update_note(title: &str, new_title: Option<&str>, content: Option<&str>) 
                 if let Some(c) = content {
                     kvc_set(&note, "body", c);
                 }
+                debug!("note updated");
                 return Ok(true);
             }
         }
+        debug!("note not found");
         Ok(false)
     }
 }
 
 /// Permanently delete a note by title.
 /// Returns `false` if no note with `title` exists.
+#[instrument]
 pub fn delete_note(title: &str) -> Result<bool> {
     let app = notes_app()?;
     unsafe {
@@ -303,9 +354,11 @@ pub fn delete_note(title: &str) -> Result<bool> {
                 let sel = objc2::sel!(delete:);
                 let _: () =
                     msg_send![app_as_any(&app), performSelector: sel, withObject: &*note];
+                debug!("note deleted");
                 return Ok(true);
             }
         }
+        debug!("note not found");
         Ok(false)
     }
 }
