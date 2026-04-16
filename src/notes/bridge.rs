@@ -130,7 +130,6 @@ pub(super) unsafe fn account_info(obj: &AnyObject) -> AccountInfo {
     AccountInfo {
         id: unsafe { kvc_string(obj, "id") },
         name: unsafe { kvc_string(obj, "name") },
-        upgraded: unsafe { kvc_bool(obj, "upgraded") },
     }
 }
 
@@ -147,7 +146,6 @@ pub(super) unsafe fn folder_info(
     FolderInfo {
         id: unsafe { kvc_string(obj, "id") },
         name: unsafe { kvc_string(obj, "name") },
-        shared: unsafe { kvc_bool(obj, "shared") },
         account: account_name.to_owned(),
         parent: parent_name.to_owned(),
     }
@@ -162,7 +160,6 @@ pub(super) unsafe fn note_info(obj: &AnyObject, folder_name: &str, account_name:
         id: unsafe { kvc_string(obj, "id") },
         title: unsafe { kvc_string(obj, "name") },
         body: unsafe { kvc_string(obj, "body") },
-        plaintext: unsafe { kvc_string(obj, "plaintext") },
         creation_date: unsafe { kvc_string(obj, "creationDate") },
         modification_date: unsafe { kvc_string(obj, "modificationDate") },
         folder: folder_name.to_owned(),
@@ -176,11 +173,9 @@ pub(super) unsafe fn attachment_info(obj: &AnyObject, note_title: &str) -> Attac
     AttachmentInfo {
         id: unsafe { kvc_string(obj, "id") },
         name: unsafe { kvc_string(obj, "name") },
-        content_identifier: unsafe { kvc_string(obj, "contentIdentifier") },
         creation_date: unsafe { kvc_string(obj, "creationDate") },
         modification_date: unsafe { kvc_string(obj, "modificationDate") },
         url: unsafe { kvc_string(obj, "URL") },
-        shared: unsafe { kvc_bool(obj, "shared") },
         note_title: note_title.to_owned(),
     }
 }

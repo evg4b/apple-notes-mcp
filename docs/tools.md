@@ -203,7 +203,6 @@ Permanently deletes a note by title.
   "id": "x-coredata://…",
   "title": "Shopping list",
   "body": "<div>…HTML…</div>",
-  "plaintext": "Milk\nEggs\n…",
   "creation_date": "2024-01-15 09:30:00 +0000",
   "modification_date": "2024-03-02 14:05:12 +0000",
   "folder": "Personal",
@@ -217,9 +216,8 @@ Permanently deletes a note by title.
 
 ```json
 {
-  "id": "x-coredata://…",
-  "name": "Work",
-  "shared": false,
+  "id":      "x-coredata://…",
+  "name":    "Work",
   "account": "iCloud",
   "parent": "iCloud"
 }
@@ -231,24 +229,18 @@ folder name for nested ones.
 ### AccountInfo
 
 ```json
-{
-  "id": "x-coredata://…",
-  "name": "iCloud",
-  "upgraded": true
-}
+{ "id": "x-coredata://…", "name": "iCloud" }
 ```
 
 ### AttachmentInfo
 
 ```json
 {
-  "id": "x-coredata://…",
-  "name": "diagram.png",
-  "content_identifier": "public.png",
-  "creation_date": "2024-01-15 09:30:00 +0000",
+  "id":                "x-coredata://…",
+  "name":              "diagram.png",
+  "creation_date":     "2024-01-15 09:30:00 +0000",
   "modification_date": "2024-01-15 09:30:00 +0000",
-  "url": "file:///…/diagram.png",
-  "shared": false,
-  "note_title": "Architecture notes"
+  "url":               "file:///…/diagram.png",
+  "note_title":        "Architecture notes"
 }
 ```
