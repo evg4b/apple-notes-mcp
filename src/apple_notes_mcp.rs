@@ -100,7 +100,11 @@ pub(crate) struct WriteResponse {
 impl AppleNotesMCP {
     // ── Read: notes ───────────────────────────────────────────────────────────
 
-    #[tool(description = "Return the titles of all notes (fast — does not fetch body content).")]
+    #[tool(
+        description = "Return the titles of every note. Fast: skips body content. \
+                          Use this to discover what notes exist or to find a title before \
+                          calling get_note."
+    )]
     pub fn list_notes(&self, _p: Parameters<EmptyRequest>) -> Json<NoteTitlesResponse> {
         debug!(tool = "list_notes", "called");
         let titles = list_notes()
@@ -111,8 +115,9 @@ impl AppleNotesMCP {
     }
 
     #[tool(
-        description = "Return full metadata and content (HTML + plaintext) for every note, \
-                          including folder, account, shared status and password-protection flag."
+        description = "Return full metadata and HTML body for every note across all accounts. \
+                          Slow on large libraries — use only when you need to read or search \
+                          content of many notes at once. For a single note prefer get_note."
     )]
     pub fn get_all_notes(&self, _p: Parameters<EmptyRequest>) -> Json<NotesResponse> {
         debug!(tool = "get_all_notes", "called");
@@ -124,8 +129,9 @@ impl AppleNotesMCP {
     }
 
     #[tool(
-        description = "Return full metadata and content for a single note looked up by title. \
-                          note is null when no note with that title exists."
+        description = "Return full metadata and HTML body for one note by exact title. \
+                          Returns null when no note matches. Use list_notes first if the \
+                          exact title is unknown."
     )]
     pub fn get_note(&self, p: Parameters<TitleRequest>) -> Json<NoteResponse> {
         debug!(tool = "get_note", "called");
@@ -137,7 +143,11 @@ impl AppleNotesMCP {
         Json(NoteResponse { note })
     }
 
-    #[tool(description = "Return all notes inside a specific folder (matched by name).")]
+    #[tool(
+        description = "Return full metadata and HTML body for all notes in a folder, \
+                          matched by exact folder name. Use list_folders first if the \
+                          folder name is unknown."
+    )]
     pub fn get_notes_in_folder(&self, p: Parameters<FolderRequest>) -> Json<NotesResponse> {
         debug!(tool = "get_notes_in_folder", "called");
         let notes = get_notes_in_folder(&p.0.folder)
@@ -147,8 +157,11 @@ impl AppleNotesMCP {
         Json(NotesResponse { notes })
     }
 
-    #[tool(description = "Return all notes belonging to a specific account \
-                          (e.g. \"iCloud\" or \"On My Mac\").")]
+    #[tool(
+        description = "Return full metadata and HTML body for all notes in an account, \
+                          matched by exact account name. Use list_accounts first if the \
+                          account name is unknown."
+    )]
     pub fn get_notes_in_account(&self, p: Parameters<AccountRequest>) -> Json<NotesResponse> {
         debug!(tool = "get_notes_in_account", "called");
         let notes = get_notes_in_account(&p.0.account)
@@ -161,8 +174,9 @@ impl AppleNotesMCP {
     // ── Read: folders & accounts ──────────────────────────────────────────────
 
     #[tool(
-        description = "Return all folders across all accounts, including subfolders, \
-                          with their account and parent-folder context."
+        description = "Return all folders and subfolders across every account, each with \
+                          its account and parent name. Call this to discover folder names \
+                          before using get_notes_in_folder or get_subfolders."
     )]
     pub fn list_folders(&self, _p: Parameters<EmptyRequest>) -> Json<FoldersResponse> {
         debug!(tool = "list_folders", "called");
@@ -173,10 +187,9 @@ impl AppleNotesMCP {
         Json(FoldersResponse { folders })
     }
 
-    #[tool(
-        description = "Return all subfolders of a specific folder (matched by name), \
-                          including nested subfolders."
-    )]
+    #[tool(description = "Return all direct and nested subfolders of a folder, \
+                          matched by exact folder name. Returns empty when the folder \
+                          has no children or does not exist.")]
     pub fn get_subfolders(&self, p: Parameters<FolderRequest>) -> Json<FoldersResponse> {
         debug!(tool = "get_subfolders", "called");
         let folders = get_subfolders(&p.0.folder)
@@ -186,8 +199,11 @@ impl AppleNotesMCP {
         Json(FoldersResponse { folders })
     }
 
-    #[tool(description = "Return all accounts configured in Apple Notes \
-                          (iCloud, On My Mac, Exchange, etc.).")]
+    #[tool(
+        description = "Return all accounts configured in Apple Notes (iCloud, On My Mac, \
+                          Exchange, …). Call this to discover account names before using \
+                          get_notes_in_account."
+    )]
     pub fn list_accounts(&self, _p: Parameters<EmptyRequest>) -> Json<AccountsResponse> {
         debug!(tool = "list_accounts", "called");
         let accounts = list_accounts()
@@ -199,7 +215,10 @@ impl AppleNotesMCP {
 
     // ── Read: attachments ─────────────────────────────────────────────────────
 
-    #[tool(description = "Return all attachments embedded in a specific note (matched by title).")]
+    #[tool(
+        description = "Return all attachments in one note, matched by exact title. \
+                          Returns empty when the note has no attachments or does not exist."
+    )]
     pub fn get_note_attachments(&self, p: Parameters<TitleRequest>) -> Json<AttachmentsResponse> {
         debug!(tool = "get_note_attachments", "called");
         let attachments = get_note_attachments_by_title(&p.0.title)
@@ -213,7 +232,11 @@ impl AppleNotesMCP {
         Json(AttachmentsResponse { attachments })
     }
 
-    #[tool(description = "Return every attachment from every note across all accounts.")]
+    #[tool(
+        description = "Return every attachment from every note across all accounts. \
+                          Slow on large libraries. Prefer get_note_attachments when \
+                          the note title is known."
+    )]
     pub fn get_all_attachments(&self, _p: Parameters<EmptyRequest>) -> Json<AttachmentsResponse> {
         debug!(tool = "get_all_attachments", "called");
         let attachments = get_all_attachments()
@@ -229,8 +252,9 @@ impl AppleNotesMCP {
 
     // ── Write ─────────────────────────────────────────────────────────────────
 
-    #[tool(description = "Create a new note with the given title and HTML body \
-                          in the default Notes folder.")]
+    #[tool(description = "Create a new note in the default folder. \
+                          content must be an HTML string, e.g. \"<b>Hello</b> world\". \
+                          Use plain text wrapped in <div> tags if no formatting is needed.")]
     pub fn create_note(&self, p: Parameters<CreateNoteRequest>) -> Json<WriteResponse> {
         debug!(tool = "create_note", "called");
         let success = create_note(&p.0.title, &p.0.content)
@@ -240,8 +264,11 @@ impl AppleNotesMCP {
         Json(WriteResponse { success })
     }
 
-    #[tool(description = "Update the title and/or body of an existing note. \
-                          Omit new_title or new_content to leave that field unchanged.")]
+    #[tool(
+        description = "Update the title and/or HTML body of an existing note by exact title. \
+                          Omit new_title or new_content to leave that field unchanged. \
+                          Returns success=false when no note with that title is found."
+    )]
     pub fn update_note(&self, p: Parameters<UpdateNoteRequest>) -> Json<WriteResponse> {
         debug!(
             tool = "update_note",
@@ -259,8 +286,10 @@ impl AppleNotesMCP {
         Json(WriteResponse { success })
     }
 
-    #[tool(description = "Permanently delete a note by title. \
-                          Returns success=false when no note with that title exists.")]
+    #[tool(
+        description = "Permanently delete a note by exact title. Cannot be undone. \
+                          Returns success=false when no note with that title is found."
+    )]
     pub fn delete_note(&self, p: Parameters<TitleRequest>) -> Json<WriteResponse> {
         debug!(tool = "delete_note", "called");
         let success = delete_note(&p.0.title)
