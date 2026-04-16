@@ -6,7 +6,7 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::msg_send;
 use objc2_foundation::NSString;
-use tracing::{debug, error, instrument, trace};
+use tracing::{debug, error, instrument, trace, warn};
 
 use super::bridge::{
     app_accounts, app_as_any, app_notes, attachment_info, collect_folders,
@@ -46,7 +46,15 @@ pub fn list_accounts() -> Result<Vec<AccountInfo>> {
     let result = unsafe {
         let arr = app_accounts(app_as_any(&app));
         let count = sb_count(&arr);
-        debug!(count, "found accounts");
+        if count == 0 {
+            warn!(
+                "Notes returned 0 accounts — this usually means macOS Automation permission \
+                 has not been granted. Go to System Settings → Privacy & Security → Automation \
+                 and allow this binary to control Notes.app."
+            );
+        } else {
+            debug!(count, "found accounts");
+        }
         let mut out = Vec::with_capacity(count);
         for i in 0..count {
             out.push(account_info(&sb_at(&arr, i)));
