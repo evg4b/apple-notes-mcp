@@ -6,13 +6,12 @@
 #![allow(non_snake_case)]
 
 use anyhow::{anyhow, Context, Result};
-use serde::{Deserialize, Serialize};
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{extern_class, msg_send, ClassType};
 use objc2_foundation::{NSObject, NSString};
-
+use rmcp::schemars;
 // ─── Link ScriptingBridge framework ──────────────────────────────────────────
 
 #[link(name = "ScriptingBridge", kind = "framework")]
@@ -37,7 +36,7 @@ extern_class!(
 // ─── Public data types ────────────────────────────────────────────────────────
 
 /// Account (e.g. "iCloud", "On My Mac").
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct AccountInfo {
     /// Unique scripting ID of the account.
     pub id: String,
@@ -47,7 +46,7 @@ pub struct AccountInfo {
 }
 
 /// A Notes folder (may be nested inside another folder or directly under an account).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct FolderInfo {
     /// Unique scripting ID of the folder.
     pub id: String,
@@ -60,7 +59,8 @@ pub struct FolderInfo {
 }
 
 /// Full metadata and content of a single note.
-#[derive(Debug, Serialize, Deserialize)]
+// #[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct NoteInfo {
     /// Unique scripting ID of the note.
     pub id: String,
@@ -80,7 +80,7 @@ pub struct NoteInfo {
 }
 
 /// A file attachment embedded in a note.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct AttachmentInfo {
     /// Unique scripting ID of the attachment.
     pub id: String,
