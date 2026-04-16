@@ -6,7 +6,7 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::msg_send;
 use objc2_foundation::NSString;
-use tracing::{debug, error, instrument, trace, warn};
+use tracing::{debug, error, instrument, warn};
 
 use super::bridge::{
     app_accounts, app_as_any, app_notes, attachment_info, collect_folders,
@@ -17,19 +17,14 @@ use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
 use super::bridge::SBApplication;
 
 /// Obtain a live ScriptingBridge proxy to Notes.app.
-#[instrument]
 fn notes_app() -> Result<Retained<SBApplication>> {
     use objc2::ClassType;
-    trace!("connecting to Notes.app via ScriptingBridge");
     let bundle_id = NSString::from_str("com.apple.Notes");
     let app: Option<Retained<SBApplication>> = unsafe {
         msg_send![SBApplication::class(), applicationWithBundleIdentifier: &*bundle_id]
     };
     match app {
-        Some(a) => {
-            trace!("ScriptingBridge connection established");
-            Ok(a)
-        }
+        Some(a) => Ok(a),
         None => {
             error!("ScriptingBridge returned nil for com.apple.Notes");
             Err(anyhow!("Cannot connect to Apple Notes via ScriptingBridge"))
@@ -46,15 +41,7 @@ pub fn list_accounts() -> Result<Vec<AccountInfo>> {
     let result = unsafe {
         let arr = app_accounts(app_as_any(&app));
         let count = sb_count(&arr);
-        if count == 0 {
-            warn!(
-                "Notes returned 0 accounts — this usually means macOS Automation permission \
-                 has not been granted. Go to System Settings → Privacy & Security → Automation \
-                 and allow this binary to control Notes.app."
-            );
-        } else {
-            debug!(count, "found accounts");
-        }
+        debug!(count, "found accounts");
         let mut out = Vec::with_capacity(count);
         for i in 0..count {
             out.push(account_info(&sb_at(&arr, i)));
@@ -73,7 +60,7 @@ pub fn list_folders() -> Result<Vec<FolderInfo>> {
     let result = unsafe {
         let accounts_arr = app_accounts(app_as_any(&app));
         let account_count = sb_count(&accounts_arr);
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(account_count);
         for i in 0..account_count {
             let account = sb_at(&accounts_arr, i);
             let account_name = kvc_string(&account, "name");
@@ -143,7 +130,7 @@ pub fn get_all_notes() -> Result<Vec<NoteInfo>> {
     let result = unsafe {
         let accounts_arr = app_accounts(app_as_any(&app));
         let account_count = sb_count(&accounts_arr);
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(account_count);
         for i in 0..account_count {
             let account = sb_at(&accounts_arr, i);
             let account_name = kvc_string(&account, "name");
@@ -380,13 +367,13 @@ mod tests {
     #[test]
     fn test_list_notes() {
         let notes = list_notes().unwrap();
-        assert!(notes.len() > 0);
+        assert!(!notes.is_empty());
     }
 
     #[test]
     fn test_list_accounts() {
         let accounts = list_accounts().unwrap();
-        assert!(accounts.len() > 0);
+        assert!(!accounts.is_empty());
         for a in &accounts {
             assert!(!a.name.is_empty(), "account name should not be empty");
             assert!(!a.id.is_empty(), "account id should not be empty");
@@ -396,7 +383,7 @@ mod tests {
     #[test]
     fn test_list_folders() {
         let folders = list_folders().unwrap();
-        assert!(folders.len() > 0);
+        assert!(!folders.is_empty());
         for f in &folders {
             assert!(!f.name.is_empty(), "folder name should not be empty");
             assert!(!f.account.is_empty(), "folder account should not be empty: {f:?}");
@@ -406,8 +393,8 @@ mod tests {
     #[test]
     fn test_get_all_notes() {
         let notes = get_all_notes().unwrap();
-        assert!(notes.len() > 0);
-        let first = &notes[0];
+        assert!(!notes.is_empty());
+        let first = notes.first().expect("asserted non-empty above");
         assert!(!first.title.is_empty());
         assert!(!first.id.is_empty());
         assert!(!first.creation_date.is_empty());
@@ -421,7 +408,7 @@ mod tests {
         if let Some(title) = titles.first() {
             let note = get_note_by_title(title).unwrap();
             assert!(note.is_some(), "note should be found by its own title");
-            let note = note.unwrap();
+            let note = note.expect("asserted is_some above");
             assert_eq!(&note.title, title);
             assert!(!note.id.is_empty());
             assert!(!note.folder.is_empty(), "folder empty for note: {note:?}");
