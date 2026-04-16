@@ -12,3 +12,4 @@ objc2 = "0.6.4"
 objc2-foundation = "0.3.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs-next = "2.0"
