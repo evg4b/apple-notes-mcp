@@ -1,28 +1,27 @@
 //! Public API — all functions are synchronous blocking calls that send Apple
 //! Events to Notes.app via ScriptingBridge.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
+use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::msg_send;
 use objc2_foundation::NSString;
 use tracing::{debug, error, instrument, warn};
 
+use super::bridge::SBApplication;
 use super::bridge::{
-    app_accounts, app_as_any, app_notes, attachment_info, collect_folders,
+    account_info, app_accounts, app_as_any, app_notes, attachment_info, collect_folders,
     collect_notes_in_folder, collect_notes_in_folders, kvc_set, kvc_string, note_attachments,
-    note_info, obj_folders, obj_notes, sb_at, sb_count, account_info,
+    note_info, obj_folders, obj_notes, sb_at, sb_count,
 };
 use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
-use super::bridge::SBApplication;
 
 /// Obtain a live ScriptingBridge proxy to Notes.app.
 fn notes_app() -> Result<Retained<SBApplication>> {
     use objc2::ClassType;
     let bundle_id = NSString::from_str("com.apple.Notes");
-    let app: Option<Retained<SBApplication>> = unsafe {
-        msg_send![SBApplication::class(), applicationWithBundleIdentifier: &*bundle_id]
-    };
+    let app: Option<Retained<SBApplication>> =
+        unsafe { msg_send![SBApplication::class(), applicationWithBundleIdentifier: &*bundle_id] };
     match app {
         Some(a) => Ok(a),
         None => {
@@ -347,8 +346,7 @@ pub fn delete_note(title: &str) -> Result<bool> {
             if kvc_string(&note, "name") == title {
                 // `delete:` is ScriptingBridge-generated; use performSelector:withObject:.
                 let sel = objc2::sel!(delete:);
-                let _: () =
-                    msg_send![app_as_any(&app), performSelector: sel, withObject: &*note];
+                let _: () = msg_send![app_as_any(&app), performSelector: sel, withObject: &*note];
                 debug!("note deleted");
                 return Ok(true);
             }
@@ -386,7 +384,10 @@ mod tests {
         assert!(!folders.is_empty());
         for f in &folders {
             assert!(!f.name.is_empty(), "folder name should not be empty");
-            assert!(!f.account.is_empty(), "folder account should not be empty: {f:?}");
+            assert!(
+                !f.account.is_empty(),
+                "folder account should not be empty: {f:?}"
+            );
         }
     }
 

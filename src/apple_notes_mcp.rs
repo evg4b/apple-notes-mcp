@@ -1,11 +1,12 @@
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::{schemars, tool, tool_router, Json};
+use rmcp::{Json, schemars, tool, tool_router};
 use tracing::{debug, info, warn};
 
 use crate::notes::{
-    create_note, delete_note, get_all_attachments, get_all_notes, get_note_attachments_by_title,
-    get_note_by_title, get_notes_in_account, get_notes_in_folder, get_subfolders, list_accounts,
-    list_folders, list_notes, update_note, AccountInfo, AttachmentInfo, FolderInfo, NoteInfo,
+    AccountInfo, AttachmentInfo, FolderInfo, NoteInfo, create_note, delete_note,
+    get_all_attachments, get_all_notes, get_note_attachments_by_title, get_note_by_title,
+    get_notes_in_account, get_notes_in_folder, get_subfolders, list_accounts, list_folders,
+    list_notes, update_note,
 };
 
 #[derive(Clone)]
@@ -109,8 +110,10 @@ impl AppleNotesMCP {
         Json(NoteTitlesResponse { titles })
     }
 
-    #[tool(description = "Return full metadata and content (HTML + plaintext) for every note, \
-                          including folder, account, shared status and password-protection flag.")]
+    #[tool(
+        description = "Return full metadata and content (HTML + plaintext) for every note, \
+                          including folder, account, shared status and password-protection flag."
+    )]
     pub fn get_all_notes(&self, _p: Parameters<EmptyRequest>) -> Json<NotesResponse> {
         debug!(tool = "get_all_notes", "called");
         let notes = get_all_notes()
@@ -120,8 +123,10 @@ impl AppleNotesMCP {
         Json(NotesResponse { notes })
     }
 
-    #[tool(description = "Return full metadata and content for a single note looked up by title. \
-                          note is null when no note with that title exists.")]
+    #[tool(
+        description = "Return full metadata and content for a single note looked up by title. \
+                          note is null when no note with that title exists."
+    )]
     pub fn get_note(&self, p: Parameters<TitleRequest>) -> Json<NoteResponse> {
         debug!(tool = "get_note", "called");
         let note = get_note_by_title(&p.0.title)
@@ -155,8 +160,10 @@ impl AppleNotesMCP {
 
     // ── Read: folders & accounts ──────────────────────────────────────────────
 
-    #[tool(description = "Return all folders across all accounts, including subfolders, \
-                          with their account and parent-folder context.")]
+    #[tool(
+        description = "Return all folders across all accounts, including subfolders, \
+                          with their account and parent-folder context."
+    )]
     pub fn list_folders(&self, _p: Parameters<EmptyRequest>) -> Json<FoldersResponse> {
         debug!(tool = "list_folders", "called");
         let folders = list_folders()
@@ -166,8 +173,10 @@ impl AppleNotesMCP {
         Json(FoldersResponse { folders })
     }
 
-    #[tool(description = "Return all subfolders of a specific folder (matched by name), \
-                          including nested subfolders.")]
+    #[tool(
+        description = "Return all subfolders of a specific folder (matched by name), \
+                          including nested subfolders."
+    )]
     pub fn get_subfolders(&self, p: Parameters<FolderRequest>) -> Json<FoldersResponse> {
         debug!(tool = "get_subfolders", "called");
         let folders = get_subfolders(&p.0.folder)
@@ -196,7 +205,11 @@ impl AppleNotesMCP {
         let attachments = get_note_attachments_by_title(&p.0.title)
             .inspect_err(|e| warn!(error = %e, "get_note_attachments failed"))
             .unwrap_or_default();
-        info!(tool = "get_note_attachments", count = attachments.len(), "ok");
+        info!(
+            tool = "get_note_attachments",
+            count = attachments.len(),
+            "ok"
+        );
         Json(AttachmentsResponse { attachments })
     }
 
@@ -206,7 +219,11 @@ impl AppleNotesMCP {
         let attachments = get_all_attachments()
             .inspect_err(|e| warn!(error = %e, "get_all_attachments failed"))
             .unwrap_or_default();
-        info!(tool = "get_all_attachments", count = attachments.len(), "ok");
+        info!(
+            tool = "get_all_attachments",
+            count = attachments.len(),
+            "ok"
+        );
         Json(AttachmentsResponse { attachments })
     }
 
@@ -226,7 +243,11 @@ impl AppleNotesMCP {
     #[tool(description = "Update the title and/or body of an existing note. \
                           Omit new_title or new_content to leave that field unchanged.")]
     pub fn update_note(&self, p: Parameters<UpdateNoteRequest>) -> Json<WriteResponse> {
-        debug!(tool = "update_note", new_title = p.0.new_title.as_deref().unwrap_or("<unchanged>"), "called");
+        debug!(
+            tool = "update_note",
+            new_title = p.0.new_title.as_deref().unwrap_or("<unchanged>"),
+            "called"
+        );
         let success = update_note(
             &p.0.title,
             p.0.new_title.as_deref(),

@@ -3,9 +3,9 @@ mod notes;
 
 use std::sync::Mutex;
 
-use apple_notes_mcp::AppleNotesMCP;
 use anyhow::{Context, Result};
-use rmcp::{transport::stdio, ServiceExt};
+use apple_notes_mcp::AppleNotesMCP;
+use rmcp::{ServiceExt, transport::stdio};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -40,8 +40,7 @@ async fn main() -> Result<()> {
     fmt()
         .with_writer(Mutex::new(file))
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
 

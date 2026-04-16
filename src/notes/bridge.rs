@@ -157,11 +157,7 @@ pub(super) unsafe fn folder_info(
 ///
 /// `folder_name` and `account_name` are passed by the caller (see note above
 /// in `folder_info`).
-pub(super) unsafe fn note_info(
-    obj: &AnyObject,
-    folder_name: &str,
-    account_name: &str,
-) -> NoteInfo {
+pub(super) unsafe fn note_info(obj: &AnyObject, folder_name: &str, account_name: &str) -> NoteInfo {
     NoteInfo {
         id: unsafe { kvc_string(obj, "id") },
         title: unsafe { kvc_string(obj, "name") },
