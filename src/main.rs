@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use apple_notes_mcp::AppleNotesMCP;
 use anyhow::{Context, Result};
 use rmcp::{transport::stdio, ServiceExt};
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, fmt};
 
 /// Default log path: ~/Library/Logs/apple-notes-mcp.log
@@ -46,6 +46,27 @@ async fn main() -> Result<()> {
         .init();
 
     info!(log = %path.display(), "apple-notes-mcp starting");
+
+    // Probe Notes.app at startup.
+    // This forces macOS to show the Automation permission dialog on the first
+    // run before the server enters the stdio loop.  Without this the dialog
+    // never fires because the ScriptingBridge connection is lazy.
+    match notes::list_accounts() {
+        Ok(accounts) if accounts.is_empty() => {
+            warn!(
+                "Notes returned 0 accounts — Automation permission is probably missing. \
+                 Go to System Settings → Privacy & Security → Automation and allow \
+                 this binary to control Notes.app, then restart."
+            );
+        }
+        Ok(accounts) => {
+            info!(accounts = accounts.len(), "Notes.app connected");
+        }
+        Err(e) => {
+            warn!(error = %e, "Notes.app probe failed — check Automation permission");
+        }
+    }
+
     let service = AppleNotesMCP.serve(stdio()).await?;
     info!("MCP server ready, waiting for requests");
     service.waiting().await?;
