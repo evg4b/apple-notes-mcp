@@ -1,7 +1,9 @@
 use rmcp::schemars;
+use rmcp::schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Account (e.g. "iCloud", "On My Mac").
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AccountInfo {
     /// Unique scripting ID of the account.
     pub id: String,
@@ -9,7 +11,7 @@ pub struct AccountInfo {
 }
 
 /// A Notes folder (may be nested inside another folder or directly under an account).
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct FolderInfo {
     /// Unique scripting ID of the folder.
     pub id: String,
@@ -21,7 +23,7 @@ pub struct FolderInfo {
 }
 
 /// Full metadata and content of a single note.
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct NoteInfo {
     /// Unique scripting ID of the note.
     pub id: String,
@@ -39,7 +41,7 @@ pub struct NoteInfo {
 }
 
 /// A file attachment embedded in a note.
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AttachmentInfo {
     /// Unique scripting ID of the attachment.
     pub id: String,

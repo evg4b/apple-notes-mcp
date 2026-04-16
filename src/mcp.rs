@@ -1,18 +1,20 @@
+use crate::notes::NotesApp;
+use crate::notes::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::{Json, schemars, tool, tool_router};
+use rmcp::{schemars, tool, tool_router, Json};
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-use crate::notes::{
-    AccountInfo, AttachmentInfo, FolderInfo, NoteInfo, create_note, delete_note,
-    get_all_attachments, get_all_notes, get_note_attachments_by_title, get_note_by_title,
-    get_notes_in_account, get_notes_in_folder, get_subfolders, list_accounts, list_folders,
-    list_notes, update_note,
-};
-
 #[derive(Clone)]
-pub struct AppleNotesMCP;
+pub struct AppleNotesMCP {
+    app: Arc<NotesApp>,
+}
 
-// ─── Request types ────────────────────────────────────────────────────────────
+impl AppleNotesMCP {
+    pub fn new(app: NotesApp) -> Self {
+        Self { app: Arc::new(app) }
+    }
+}
 
 #[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
 pub(crate) struct EmptyRequest {}
@@ -53,10 +55,6 @@ pub(crate) struct UpdateNoteRequest {
     new_content: Option<String>,
 }
 
-// ─── Response types ───────────────────────────────────────────────────────────
-// MCP requires the root output schema to be an `object`, so every array or
-// optional value must be wrapped in a named struct.
-
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct NoteTitlesResponse {
     titles: Vec<String>,
@@ -94,12 +92,8 @@ pub(crate) struct WriteResponse {
     success: bool,
 }
 
-// ─── Tool implementations ─────────────────────────────────────────────────────
-
 #[tool_router(server_handler)]
 impl AppleNotesMCP {
-    // ── Read: notes ───────────────────────────────────────────────────────────
-
     #[tool(
         description = "Return the titles of every note. Fast: skips body content. \
                           Use this to discover what notes exist or to find a title before \
@@ -107,7 +101,9 @@ impl AppleNotesMCP {
     )]
     pub fn list_notes(&self, _p: Parameters<EmptyRequest>) -> Json<NoteTitlesResponse> {
         debug!(tool = "list_notes", "called");
-        let titles = list_notes()
+        let titles = self
+            .app
+            .list_notes()
             .inspect_err(|e| warn!(error = %e, "list_notes failed"))
             .unwrap_or_default();
         info!(tool = "list_notes", count = titles.len(), "ok");
@@ -121,7 +117,9 @@ impl AppleNotesMCP {
     )]
     pub fn get_all_notes(&self, _p: Parameters<EmptyRequest>) -> Json<NotesResponse> {
         debug!(tool = "get_all_notes", "called");
-        let notes = get_all_notes()
+        let notes = self
+            .app
+            .get_all_notes()
             .inspect_err(|e| warn!(error = %e, "get_all_notes failed"))
             .unwrap_or_default();
         info!(tool = "get_all_notes", count = notes.len(), "ok");
@@ -135,7 +133,9 @@ impl AppleNotesMCP {
     )]
     pub fn get_note(&self, p: Parameters<TitleRequest>) -> Json<NoteResponse> {
         debug!(tool = "get_note", "called");
-        let note = get_note_by_title(&p.0.title)
+        let note = self
+            .app
+            .get_note_by_title(&p.0.title)
             .inspect_err(|e| warn!(error = %e, "get_note failed"))
             .ok()
             .flatten();
@@ -150,7 +150,9 @@ impl AppleNotesMCP {
     )]
     pub fn get_notes_in_folder(&self, p: Parameters<FolderRequest>) -> Json<NotesResponse> {
         debug!(tool = "get_notes_in_folder", "called");
-        let notes = get_notes_in_folder(&p.0.folder)
+        let notes = self
+            .app
+            .get_notes_in_folder(&p.0.folder)
             .inspect_err(|e| warn!(error = %e, "get_notes_in_folder failed"))
             .unwrap_or_default();
         info!(tool = "get_notes_in_folder", count = notes.len(), "ok");
@@ -164,14 +166,14 @@ impl AppleNotesMCP {
     )]
     pub fn get_notes_in_account(&self, p: Parameters<AccountRequest>) -> Json<NotesResponse> {
         debug!(tool = "get_notes_in_account", "called");
-        let notes = get_notes_in_account(&p.0.account)
+        let notes = self
+            .app
+            .get_notes_in_account(&p.0.account)
             .inspect_err(|e| warn!(error = %e, "get_notes_in_account failed"))
             .unwrap_or_default();
         info!(tool = "get_notes_in_account", count = notes.len(), "ok");
         Json(NotesResponse { notes })
     }
-
-    // ── Read: folders & accounts ──────────────────────────────────────────────
 
     #[tool(
         description = "Return all folders and subfolders across every account, each with \
@@ -180,7 +182,9 @@ impl AppleNotesMCP {
     )]
     pub fn list_folders(&self, _p: Parameters<EmptyRequest>) -> Json<FoldersResponse> {
         debug!(tool = "list_folders", "called");
-        let folders = list_folders()
+        let folders = self
+            .app
+            .list_folders()
             .inspect_err(|e| warn!(error = %e, "list_folders failed"))
             .unwrap_or_default();
         info!(tool = "list_folders", count = folders.len(), "ok");
@@ -192,7 +196,9 @@ impl AppleNotesMCP {
                           has no children or does not exist.")]
     pub fn get_subfolders(&self, p: Parameters<FolderRequest>) -> Json<FoldersResponse> {
         debug!(tool = "get_subfolders", "called");
-        let folders = get_subfolders(&p.0.folder)
+        let folders = self
+            .app
+            .get_subfolders(&p.0.folder)
             .inspect_err(|e| warn!(error = %e, "get_subfolders failed"))
             .unwrap_or_default();
         info!(tool = "get_subfolders", count = folders.len(), "ok");
@@ -206,14 +212,14 @@ impl AppleNotesMCP {
     )]
     pub fn list_accounts(&self, _p: Parameters<EmptyRequest>) -> Json<AccountsResponse> {
         debug!(tool = "list_accounts", "called");
-        let accounts = list_accounts()
+        let accounts = self
+            .app
+            .list_accounts()
             .inspect_err(|e| warn!(error = %e, "list_accounts failed"))
             .unwrap_or_default();
         info!(tool = "list_accounts", count = accounts.len(), "ok");
         Json(AccountsResponse { accounts })
     }
-
-    // ── Read: attachments ─────────────────────────────────────────────────────
 
     #[tool(
         description = "Return all attachments in one note, matched by exact title. \
@@ -221,7 +227,9 @@ impl AppleNotesMCP {
     )]
     pub fn get_note_attachments(&self, p: Parameters<TitleRequest>) -> Json<AttachmentsResponse> {
         debug!(tool = "get_note_attachments", "called");
-        let attachments = get_note_attachments_by_title(&p.0.title)
+        let attachments = self
+            .app
+            .get_note_attachments_by_title(&p.0.title)
             .inspect_err(|e| warn!(error = %e, "get_note_attachments failed"))
             .unwrap_or_default();
         info!(
@@ -239,7 +247,9 @@ impl AppleNotesMCP {
     )]
     pub fn get_all_attachments(&self, _p: Parameters<EmptyRequest>) -> Json<AttachmentsResponse> {
         debug!(tool = "get_all_attachments", "called");
-        let attachments = get_all_attachments()
+        let attachments = self
+            .app
+            .get_all_attachments()
             .inspect_err(|e| warn!(error = %e, "get_all_attachments failed"))
             .unwrap_or_default();
         info!(
@@ -250,14 +260,14 @@ impl AppleNotesMCP {
         Json(AttachmentsResponse { attachments })
     }
 
-    // ── Write ─────────────────────────────────────────────────────────────────
-
     #[tool(description = "Create a new note in the default folder. \
                           content must be an HTML string, e.g. \"<b>Hello</b> world\". \
                           Use plain text wrapped in <div> tags if no formatting is needed.")]
     pub fn create_note(&self, p: Parameters<CreateNoteRequest>) -> Json<WriteResponse> {
         debug!(tool = "create_note", "called");
-        let success = create_note(&p.0.title, &p.0.content)
+        let success = self
+            .app
+            .create_note(&p.0.title, &p.0.content)
             .inspect_err(|e| warn!(error = %e, "create_note failed"))
             .is_ok();
         info!(tool = "create_note", success, "ok");
@@ -275,13 +285,15 @@ impl AppleNotesMCP {
             new_title = p.0.new_title.as_deref().unwrap_or("<unchanged>"),
             "called"
         );
-        let success = update_note(
-            &p.0.title,
-            p.0.new_title.as_deref(),
-            p.0.new_content.as_deref(),
-        )
-        .inspect_err(|e| warn!(error = %e, "update_note failed"))
-        .unwrap_or(false);
+        let success = self
+            .app
+            .update_note(
+                &p.0.title,
+                p.0.new_title.as_deref(),
+                p.0.new_content.as_deref(),
+            )
+            .inspect_err(|e| warn!(error = %e, "update_note failed"))
+            .unwrap_or(false);
         info!(tool = "update_note", success, "ok");
         Json(WriteResponse { success })
     }
@@ -292,7 +304,9 @@ impl AppleNotesMCP {
     )]
     pub fn delete_note(&self, p: Parameters<TitleRequest>) -> Json<WriteResponse> {
         debug!(tool = "delete_note", "called");
-        let success = delete_note(&p.0.title)
+        let success = self
+            .app
+            .delete_note(&p.0.title)
             .inspect_err(|e| warn!(error = %e, "delete_note failed"))
             .unwrap_or(false);
         info!(tool = "delete_note", success, "ok");

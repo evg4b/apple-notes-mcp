@@ -13,16 +13,8 @@
 
 `apple-notes-mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server that
 exposes Apple Notes to AI assistants via the stdio transport. It talks directly to Notes.app
-through [ScriptingBridge](https://developer.apple.com/documentation/scriptingbridge) — no cloud
+through [ScriptingBridge](https://developer.apple.com/documentation/scriptingbridge) - no cloud
 API, no extra processes, no background daemon.
-
-## Requirements
-
-| | |
-|-----------------------|-------------------------------------------------------------------------|
-| macOS                 | 13 Ventura or later |
-| Apple Notes | At least one account configured (iCloud or On My Mac)       |
-| Automation permission | Prompted on first run                                        |
 
 ## Installation
 

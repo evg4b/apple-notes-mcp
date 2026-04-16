@@ -2,6 +2,12 @@
 name = "apple-notes-mcp"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Read and write Apple Notes from any MCP-compatible AI client"
+homepage = "https://github.com/evg4b/apple-notes-mcp"
+repository = "git@github.com:evg4b/apple-notes-mcp.git"
+authors = ["Evgeny Abramovich"]
+readme = "README.md"
 
 [profile.release]
 opt-level = "z"        # optimise for size, not speed
