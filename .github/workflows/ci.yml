@@ -30,26 +30,34 @@ jobs:
         run: cargo clippy --all-targets
 
   build:
-    name: Build
+    name: Build (${{ matrix.target }})
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: Build (debug)
-        run: cargo build
+        with:
+          key: ${{ matrix.target }}
 
       - name: Build (release)
-        run: cargo build --release
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: apple-notes-mcp
-          path: target/release/apple-notes-mcp
+          name: apple-notes-mcp-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/apple-notes-mcp
           retention-days: 7
 
   test:
