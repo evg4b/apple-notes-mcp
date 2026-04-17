@@ -11,7 +11,7 @@ use super::bridge::{
     collect_notes_in_folder, collect_notes_in_folders, note_attachments, note_info, obj_folders,
     obj_notes,
 };
-use super::helpers::{kvc_set, kvc_string, sb_at, sb_count};
+use super::helpers::{kvc_set, kvc_string, kvc_string_vec, sb_at, sb_count};
 use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
 
 /// A live ScriptingBridge proxy to Notes.app.
@@ -122,13 +122,9 @@ impl NotesApp {
     pub fn list_notes(&self) -> Result<Vec<String>> {
         let result = unsafe {
             let arr = app_notes(&self.sb_app);
-            let count = sb_count(&arr);
-            debug!(count, "fetching note titles");
-            let mut out = Vec::with_capacity(count);
-            for i in 0..count {
-                out.push(kvc_string(&sb_at(&arr, i), "name"));
-            }
-            out
+            let names = kvc_string_vec(&arr, "name");
+            debug!(count = names.len(), "fetching note titles");
+            names
         };
         Ok(result)
     }
@@ -167,13 +163,12 @@ impl NotesApp {
                     let folder = sb_at(&folders_arr, j);
                     let folder_name = kvc_string(&folder, "name");
                     let notes_arr = obj_notes(&folder);
-                    let note_count = sb_count(&notes_arr);
-                    for k in 0..note_count {
+                    // Batch-fetch all titles in this folder: 1 AE instead of 2 per note.
+                    let names = kvc_string_vec(&notes_arr, "name");
+                    if let Some(k) = names.iter().position(|n| n == title) {
                         let note = sb_at(&notes_arr, k);
-                        if kvc_string(&note, "name") == title {
-                            debug!(folder = %folder_name, account = %account_name, "note found");
-                            return Ok(Some(note_info(&note, &folder_name, &account_name)));
-                        }
+                        debug!(folder = %folder_name, account = %account_name, "note found");
+                        return Ok(Some(note_info(&note, &folder_name, &account_name)));
                     }
                 }
             }
@@ -231,20 +226,17 @@ impl NotesApp {
     pub fn get_note_attachments_by_title(&self, title: &str) -> Result<Vec<AttachmentInfo>> {
         unsafe {
             let arr = app_notes(&self.sb_app);
-            let count = sb_count(&arr);
-            for i in 0..count {
+            let names = kvc_string_vec(&arr, "name");
+            if let Some(i) = names.iter().position(|n| n == title) {
                 let note = sb_at(&arr, i);
-                let note_title = kvc_string(&note, "name");
-                if note_title == title {
-                    let att_arr = note_attachments(&note);
-                    let att_count = sb_count(&att_arr);
-                    debug!(count = att_count, "found attachments");
-                    let mut out = Vec::with_capacity(att_count);
-                    for j in 0..att_count {
-                        out.push(attachment_info(&sb_at(&att_arr, j), &note_title));
-                    }
-                    return Ok(out);
+                let att_arr = note_attachments(&note);
+                let att_count = sb_count(&att_arr);
+                debug!(count = att_count, "found attachments");
+                let mut out = Vec::with_capacity(att_count);
+                for j in 0..att_count {
+                    out.push(attachment_info(&sb_at(&att_arr, j), title));
                 }
+                return Ok(out);
             }
             debug!("note not found");
             Ok(vec![])
@@ -281,9 +273,12 @@ impl NotesApp {
                 .context("Notes scripting class 'note' not found — is Notes.app installed?")?;
 
             let raw_alloc: *mut AnyObject = msg_send![&*note_cls, alloc];
+            if raw_alloc.is_null() {
+                anyhow::bail!("Failed to allocate note object");
+            }
             let raw_init: *mut AnyObject = msg_send![raw_alloc, init];
             let note = Retained::from_raw(raw_init)
-                .ok_or_else(|| anyhow!("Failed to instantiate note object"))?;
+                .ok_or_else(|| anyhow!("Failed to initialize note object"))?;
 
             let arr = app_notes(&self.sb_app);
             let _: () = msg_send![&*arr, insertObject: &*note, atIndex: 0usize];
@@ -304,19 +299,17 @@ impl NotesApp {
     ) -> Result<bool> {
         unsafe {
             let arr = app_notes(&self.sb_app);
-            let count = sb_count(&arr);
-            for i in 0..count {
+            let names = kvc_string_vec(&arr, "name");
+            if let Some(i) = names.iter().position(|n| n == title) {
                 let note = sb_at(&arr, i);
-                if kvc_string(&note, "name") == title {
-                    if let Some(t) = new_title {
-                        kvc_set(&note, "name", t);
-                    }
-                    if let Some(c) = content {
-                        kvc_set(&note, "body", c);
-                    }
-                    debug!("note updated");
-                    return Ok(true);
+                if let Some(t) = new_title {
+                    kvc_set(&note, "name", t);
                 }
+                if let Some(c) = content {
+                    kvc_set(&note, "body", c);
+                }
+                debug!("note updated");
+                return Ok(true);
             }
             debug!("note not found");
             Ok(false)
@@ -327,15 +320,13 @@ impl NotesApp {
     pub fn delete_note(&self, title: &str) -> Result<bool> {
         unsafe {
             let arr = app_notes(&self.sb_app);
-            let count = sb_count(&arr);
-            for i in 0..count {
+            let names = kvc_string_vec(&arr, "name");
+            if let Some(i) = names.iter().position(|n| n == title) {
                 let note = sb_at(&arr, i);
-                if kvc_string(&note, "name") == title {
-                    let sel = objc2::sel!(delete:);
-                    let _: () = msg_send![&self.sb_app, performSelector: sel, withObject: &*note];
-                    debug!("note deleted");
-                    return Ok(true);
-                }
+                let sel = objc2::sel!(delete:);
+                let _: () = msg_send![&self.sb_app, performSelector: sel, withObject: &*note];
+                debug!("note deleted");
+                return Ok(true);
             }
             debug!("note not found");
             Ok(false)

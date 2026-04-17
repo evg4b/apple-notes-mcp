@@ -55,6 +55,47 @@ pub(super) unsafe fn sb_at(arr: &AnyObject, index: usize) -> Retained<AnyObject>
     unsafe { msg_send![arr, objectAtIndex: index] }
 }
 
+/// Batch-fetch a string property from every element in an SBElementArray.
+///
+/// Calls `valueForKey:` on the *collection* (not individual elements), which
+/// ScriptingBridge translates into a single "get all elements' <key>" Apple
+/// Event. The result is a plain NSArray — subsequent iteration is local (no
+/// further Apple Events). This reduces O(2N) Apple Events to O(1).
+pub(super) unsafe fn kvc_string_vec(collection: &AnyObject, key: &str) -> Vec<String> {
+    match unsafe { kvc_get(collection, key) } {
+        None => Vec::new(),
+        Some(arr) => {
+            let count = unsafe { sb_count(&arr) };
+            (0..count)
+                .map(|i| {
+                    let elem = unsafe { sb_at(&arr, i) };
+                    let desc: Retained<NSString> = unsafe { msg_send![&*elem, description] };
+                    desc.to_string()
+                })
+                .collect()
+        }
+    }
+}
+
+/// Batch-fetch a boolean property from every element in an SBElementArray.
+///
+/// Same single-Apple-Event strategy as `kvc_string_vec`.
+pub(super) unsafe fn kvc_bool_vec(collection: &AnyObject, key: &str) -> Vec<bool> {
+    match unsafe { kvc_get(collection, key) } {
+        None => Vec::new(),
+        Some(arr) => {
+            let count = unsafe { sb_count(&arr) };
+            (0..count)
+                .map(|i| {
+                    let elem = unsafe { sb_at(&arr, i) };
+                    let n: i8 = unsafe { msg_send![&*elem, charValue] };
+                    n != 0
+                })
+                .collect()
+        }
+    }
+}
+
 /// Retrieve a ScriptingBridge element collection via `performSelector:`.
 ///
 /// ScriptingBridge routes collection selectors (`notes`, `folders`, `accounts`,
