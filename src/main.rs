@@ -4,10 +4,10 @@ mod notes;
 use anyhow::{Context, Result};
 use mcp::AppleNotesMCP;
 use notes::NotesApp;
-use rmcp::{transport::stdio, ServiceExt};
+use rmcp::{ServiceExt, transport::stdio};
 use std::sync::Mutex;
 use tracing::info;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 /// Default log path: ~/Library/Logs/apple-notes-mcp.log
 /// Override with the APPLE_NOTES_MCP_LOG environment variable.

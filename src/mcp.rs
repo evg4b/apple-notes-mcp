@@ -1,7 +1,7 @@
 use crate::notes::NotesApp;
 use crate::notes::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::{schemars, tool, tool_router, Json};
+use rmcp::{Json, schemars, tool, tool_router};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 

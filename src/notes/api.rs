@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::{msg_send, ClassType};
+use objc2::{ClassType, msg_send};
 use objc2_foundation::NSString;
 use tracing::{debug, info, instrument, warn};
 
@@ -54,7 +54,7 @@ impl NotesApp {
             }
         }
 
-        return Ok(app);
+        Ok(app)
     }
 
     #[instrument(skip(self))]
@@ -352,12 +352,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires Notes.app with Automation permission"]
     fn test_list_notes() {
         let notes = app().list_notes().unwrap();
         assert!(!notes.is_empty());
     }
 
     #[test]
+    #[ignore = "requires Notes.app with Automation permission"]
     fn test_list_accounts() {
         let accounts = app().list_accounts().unwrap();
         assert!(!accounts.is_empty());
@@ -368,6 +370,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires Notes.app with Automation permission"]
     fn test_list_folders() {
         let folders = app().list_folders().unwrap();
         assert!(!folders.is_empty());
@@ -381,6 +384,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires Notes.app with Automation permission"]
     fn test_get_all_notes() {
         let notes = app().get_all_notes().unwrap();
         assert!(!notes.is_empty());
@@ -393,6 +397,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires Notes.app with Automation permission"]
     fn test_get_note_by_title() {
         let app = app();
         let titles = app.list_notes().unwrap();

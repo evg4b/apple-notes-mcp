@@ -27,7 +27,7 @@ jobs:
         run: cargo fmt --check
 
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets -- -D warnings
 
   build:
     name: Build (${{ matrix.target }})
@@ -61,7 +61,7 @@ jobs:
           retention-days: 7
 
   test:
-    name: Test (compile)
+    name: Test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,8 +70,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # Integration tests require a live Notes.app with Automation permission,
-      # which is not available on CI runners. Compile-only check ensures the
-      # test code stays valid without executing it.
-      - name: Compile tests
-        run: cargo test --no-run
+      # Integration tests (api.rs) require a live Notes.app with Automation
+      # permission and are marked #[ignore]. Only unit tests (helpers.rs) run
+      # here. Run locally with `cargo test -- --ignored` to execute all tests.
+      - name: Unit tests
+        run: cargo test
