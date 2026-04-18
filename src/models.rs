@@ -1,28 +1,30 @@
 use crate::notes::{AccountInfo, FolderInfo, NoteInfo};
 use rmcp::schemars;
+use rmcp::serde::{Deserialize, Serialize};
+use schemars::JsonSchema;
 
-#[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct EmptyRequest {}
 
-#[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct TitleRequest {
     /// Title of the note.
     pub title: String,
 }
 
-#[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct FolderRequest {
     /// Name of the folder.
     pub folder: String,
 }
 
-#[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct AccountRequest {
     /// Name of the account (e.g. "iCloud" or "On My Mac").
     pub account: String,
 }
 
-#[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct CreateNoteRequest {
     /// Title of the new note.
     pub title: String,
@@ -30,7 +32,7 @@ pub(crate) struct CreateNoteRequest {
     pub content: String,
 }
 
-#[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct UpdateNoteRequest {
     /// Current title of the note to update.
     pub title: String,
@@ -40,33 +42,33 @@ pub(crate) struct UpdateNoteRequest {
     pub new_content: Option<String>,
 }
 
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct NoteTitlesResponse {
     pub titles: Vec<String>,
 }
 
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct NotesResponse {
     pub notes: Vec<NoteInfo>,
 }
 
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct NoteResponse {
     /// `null` when no note with the requested title was found.
     pub note: Option<NoteInfo>,
 }
 
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct FoldersResponse {
     pub folders: Vec<FolderInfo>,
 }
 
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct AccountsResponse {
     pub accounts: Vec<AccountInfo>,
 }
 
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct WriteResponse {
     /// `true` if the note was found and the operation applied.
     pub success: bool,

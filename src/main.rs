@@ -8,48 +8,40 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use mcp::AppleNotesMCP;
 use notes::NotesApp;
-use rmcp::{ServiceExt, transport::stdio};
+use rmcp::{transport::stdio, ServiceExt};
+use std::env;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tracing::info;
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing_subscriber::{fmt};
 
-/// Default log path: ~/Library/Logs/apple-notes-mcp.log
-/// Override with the APPLE_NOTES_MCP_LOG environment variable.
-fn log_path() -> std::path::PathBuf {
-    if let Ok(p) = std::env::var("APPLE_NOTES_MCP_LOG") {
-        return std::path::PathBuf::from(p);
-    }
-    let mut p = dirs_next::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-    p.push("Library/Logs/apple-notes-mcp.log");
-    p
+fn default_log_path() -> PathBuf {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join("Library/Logs/apple-notes-mcp.log"))
+        .unwrap_or_else(|| PathBuf::from("apple-notes-mcp.log"))
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let path = log_path();
-    if let Some(parent) = path.parent() {
+
+    let log_file_path = args.log_file.unwrap_or_else(default_log_path);
+
+    if let Some(parent) = log_file_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("create log directory {}", parent.display()))?;
     }
+
     let file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&path)
-        .with_context(|| format!("open log file {}", path.display()))?;
+        .open(&log_file_path)
+        .with_context(|| format!("open log file {}", log_file_path.display()))?;
 
-    // stdout is reserved for the MCP stdio transport — all logs go to the file.
-    // Control verbosity with RUST_LOG, e.g.:
-    //   RUST_LOG=debug                              — everything
-    //   RUST_LOG=apple_notes_mcp=trace,rmcp=debug
-    fmt()
-        .with_writer(Mutex::new(file))
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+    fmt().with_writer(Mutex::new(file)).with_ansi(false).init();
 
-    info!(log = %path.display(), "apple-notes-mcp starting");
+    info!(log = %log_file_path.display(), "apple-notes-mcp starting");
 
     let notes_app = NotesApp::connect()?;
     let service = AppleNotesMCP::new(notes_app, args.scopes)

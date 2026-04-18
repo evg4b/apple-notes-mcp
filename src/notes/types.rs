@@ -1,6 +1,6 @@
 use rmcp::schemars;
 use rmcp::schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use rmcp::serde::{Deserialize, Serialize};
 
 /// Account (e.g. "iCloud", "On My Mac").
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

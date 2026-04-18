@@ -3,6 +3,7 @@
 ## Log file
 
 All output goes to a log file — stdout is reserved for the MCP stdio transport.
+The file output is plain text, with ANSI terminal color codes disabled for readability.
 
 |              |                                         |
 |--------------|-----------------------------------------|
