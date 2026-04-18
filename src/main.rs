@@ -1,8 +1,11 @@
+mod cli;
 mod mcp;
-mod notes;
 mod models;
+mod notes;
 
+use crate::cli::Args;
 use anyhow::{Context, Result};
+use clap::Parser;
 use mcp::AppleNotesMCP;
 use notes::NotesApp;
 use rmcp::{ServiceExt, transport::stdio};
@@ -23,6 +26,7 @@ fn log_path() -> std::path::PathBuf {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
     let path = log_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -48,7 +52,9 @@ async fn main() -> Result<()> {
     info!(log = %path.display(), "apple-notes-mcp starting");
 
     let notes_app = NotesApp::connect()?;
-    let service = AppleNotesMCP::new(notes_app).serve(stdio()).await?;
+    let service = AppleNotesMCP::new(notes_app, args.scopes)
+        .serve(stdio())
+        .await?;
     info!("MCP server ready, waiting for requests");
     service.waiting().await?;
     info!("MCP server shut down");

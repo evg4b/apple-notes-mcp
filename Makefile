@@ -36,5 +36,9 @@ inspector-release:
 	$(CARGO) build --release --target $(TARGET_ARM64)
 	$(NPX) -y $(INSPECTOR_PKG) $(abspath target/$(TARGET_ARM64)/release/$(BIN))
 
+fmt:
+	$(CARGO) fmt
+	$(CARGO) clippy --all-targets -- -D warnings
+
 clean:
 	$(CARGO) clean

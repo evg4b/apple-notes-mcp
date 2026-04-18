@@ -26,3 +26,4 @@ objc2-foundation = "0.3.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dirs-next = "2.0"
+clap = { version = "4.6.1", features = ["derive"] }

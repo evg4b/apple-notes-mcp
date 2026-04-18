@@ -1,4 +1,6 @@
-use super::helpers::{kvc_bool, kvc_bool_vec, kvc_string, kvc_string_vec, sb_at, sb_collection, sb_count};
+use super::helpers::{
+    kvc_bool, kvc_bool_vec, kvc_string, kvc_string_vec, sb_at, sb_collection, sb_count,
+};
 use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
 use objc2::extern_class;
 use objc2::rc::Retained;

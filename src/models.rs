@@ -1,5 +1,5 @@
-use rmcp::schemars;
 use crate::notes::{AccountInfo, FolderInfo, NoteInfo};
+use rmcp::schemars;
 
 #[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
 pub(crate) struct EmptyRequest {}

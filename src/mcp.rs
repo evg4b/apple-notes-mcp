@@ -1,22 +1,35 @@
 use crate::models::{
-    AccountRequest, AccountsResponse, CreateNoteRequest, EmptyRequest,
-    FolderRequest, FoldersResponse, NoteResponse, NoteTitlesResponse, NotesResponse, TitleRequest,
+    AccountRequest, AccountsResponse, CreateNoteRequest, EmptyRequest, FolderRequest,
+    FoldersResponse, NoteResponse, NoteTitlesResponse, NotesResponse, TitleRequest,
     UpdateNoteRequest, WriteResponse,
 };
 use crate::notes::NotesApp;
+use clap::ValueEnum;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::{tool, tool_router, Json};
+use rmcp::{Json, tool, tool_router};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum Scope {
+    Read,
+    Write,
+    Delete,
+}
 
 #[derive(Clone)]
 pub struct AppleNotesMCP {
     app: Arc<NotesApp>,
+    #[allow(unused)]
+    scopes: Vec<Scope>,
 }
 
 impl AppleNotesMCP {
-    pub fn new(app: NotesApp) -> Self {
-        Self { app: Arc::new(app) }
+    pub fn new(app: NotesApp, scopes: Vec<Scope>) -> Self {
+        Self {
+            app: Arc::new(app),
+            scopes,
+        }
     }
 }
 
