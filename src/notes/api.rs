@@ -223,6 +223,7 @@ impl NotesApp {
     }
 
     #[instrument(skip(self))]
+    #[allow(dead_code)]
     pub fn get_note_attachments_by_title(&self, title: &str) -> Result<Vec<AttachmentInfo>> {
         unsafe {
             let arr = app_notes(&self.sb_app);
@@ -244,6 +245,7 @@ impl NotesApp {
     }
 
     #[instrument(skip(self))]
+    #[allow(dead_code)]
     pub fn get_all_attachments(&self) -> Result<Vec<AttachmentInfo>> {
         unsafe {
             let notes_arr = app_notes(&self.sb_app);

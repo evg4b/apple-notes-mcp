@@ -30,6 +30,8 @@ pub(super) unsafe fn obj_notes(obj: &AnyObject) -> Retained<AnyObject> {
 pub(super) unsafe fn obj_folders(obj: &AnyObject) -> Retained<AnyObject> {
     unsafe { sb_collection(obj, objc2::sel!(folders)) }
 }
+
+#[allow(dead_code)]
 pub(super) unsafe fn note_attachments(note: &AnyObject) -> Retained<AnyObject> {
     unsafe { sb_collection(note, objc2::sel!(attachments)) }
 }
@@ -59,6 +61,7 @@ pub(super) unsafe fn note_info(obj: &AnyObject, folder_name: &str, account_name:
     }
 }
 
+#[allow(dead_code)]
 pub(super) unsafe fn attachment_info(obj: &AnyObject, note_title: &str) -> AttachmentInfo {
     AttachmentInfo {
         id: unsafe { kvc_string(obj, "id") },

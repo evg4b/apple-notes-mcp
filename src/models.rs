@@ -1,5 +1,5 @@
 use rmcp::schemars;
-use crate::notes::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
+use crate::notes::{AccountInfo, FolderInfo, NoteInfo};
 
 #[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
 pub(crate) struct EmptyRequest {}
@@ -64,11 +64,6 @@ pub(crate) struct FoldersResponse {
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct AccountsResponse {
     pub accounts: Vec<AccountInfo>,
-}
-
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct AttachmentsResponse {
-    pub attachments: Vec<AttachmentInfo>,
 }
 
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]

@@ -1,5 +1,5 @@
 use crate::models::{
-    AccountRequest, AccountsResponse, AttachmentsResponse, CreateNoteRequest, EmptyRequest,
+    AccountRequest, AccountsResponse, CreateNoteRequest, EmptyRequest,
     FolderRequest, FoldersResponse, NoteResponse, NoteTitlesResponse, NotesResponse, TitleRequest,
     UpdateNoteRequest, WriteResponse,
 };
@@ -147,45 +147,6 @@ impl AppleNotesMCP {
             .unwrap_or_default();
         info!(tool = "list_accounts", count = accounts.len(), "ok");
         Json(AccountsResponse { accounts })
-    }
-
-    #[tool(
-        description = "Return all attachments in one note, matched by exact title. \
-                          Returns empty when the note has no attachments or does not exist."
-    )]
-    pub fn get_note_attachments(&self, p: Parameters<TitleRequest>) -> Json<AttachmentsResponse> {
-        debug!(tool = "get_note_attachments", "called");
-        let attachments = self
-            .app
-            .get_note_attachments_by_title(&p.0.title)
-            .inspect_err(|e| warn!(error = %e, "get_note_attachments failed"))
-            .unwrap_or_default();
-        info!(
-            tool = "get_note_attachments",
-            count = attachments.len(),
-            "ok"
-        );
-        Json(AttachmentsResponse { attachments })
-    }
-
-    #[tool(
-        description = "Return every attachment from every note across all accounts. \
-                          Slow on large libraries. Prefer get_note_attachments when \
-                          the note title is known."
-    )]
-    pub fn get_all_attachments(&self, _p: Parameters<EmptyRequest>) -> Json<AttachmentsResponse> {
-        debug!(tool = "get_all_attachments", "called");
-        let attachments = self
-            .app
-            .get_all_attachments()
-            .inspect_err(|e| warn!(error = %e, "get_all_attachments failed"))
-            .unwrap_or_default();
-        info!(
-            tool = "get_all_attachments",
-            count = attachments.len(),
-            "ok"
-        );
-        Json(AttachmentsResponse { attachments })
     }
 
     #[tool(description = "Create a new note in the default folder. \

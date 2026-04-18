@@ -40,6 +40,7 @@ pub struct NoteInfo {
     pub password_protected: bool,
 }
 
+#[allow(dead_code)]
 /// A file attachment embedded in a note.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AttachmentInfo {
