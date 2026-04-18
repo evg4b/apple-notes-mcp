@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, anyhow};
+use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::{ClassType, msg_send};
-use objc2_foundation::NSString;
+use objc2_foundation::{NSMutableDictionary, NSObject, NSString};
 use tracing::{debug, info, instrument, warn};
 
 use super::bridge::SBApplication;
@@ -12,7 +12,7 @@ use super::bridge::{
     obj_notes,
 };
 use super::helpers::{kvc_set, kvc_string, kvc_string_vec, sb_at, sb_count};
-use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
+use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo, PartialNoteInfo};
 
 /// A live ScriptingBridge proxy to Notes.app.
 pub struct NotesApp {
@@ -29,9 +29,9 @@ static APPLE_NOTES_BUNDLE_ID: &str = "com.apple.Notes";
 impl NotesApp {
     pub fn connect() -> Result<Self> {
         let bundle_id = NSString::from_str(APPLE_NOTES_BUNDLE_ID);
-        let retained_app: Option<Retained<SBApplication>> = unsafe {
-            msg_send![SBApplication::class(), applicationWithBundleIdentifier: &*bundle_id]
-        };
+        // Use the typed constructor from objc2-scripting-bridge — no manual msg_send! needed.
+        let retained_app: Option<Retained<SBApplication>> =
+            unsafe { SBApplication::applicationWithBundleIdentifier(&bundle_id) };
 
         let sb_app =
             retained_app.ok_or(anyhow!("Cannot connect to Apple Notes via ScriptingBridge"))?;
@@ -266,30 +266,59 @@ impl NotesApp {
     }
 
     #[instrument(skip(self, content))]
-    pub fn create_note(&self, title: &str, content: &str) -> Result<()> {
+    pub fn create_note(&self, title: &str, content: &str) -> Result<PartialNoteInfo> {
         unsafe {
             let class_name = NSString::from_str("note");
+            // classForScriptingClass: returns the ObjC class object for the scripting class.
             let note_cls: Option<Retained<AnyObject>> =
                 msg_send![&*self.sb_app, classForScriptingClass: &*class_name];
             let note_cls = note_cls
                 .context("Notes scripting class 'note' not found — is Notes.app installed?")?;
 
+            // Build a properties dictionary with title and body BEFORE inserting the note.
+            // Using initWithProperties: ensures the Apple Event carries both fields at creation
+            // time, which is more reliable than setting them via KVC after insert.
+            let props = NSMutableDictionary::<NSString, NSObject>::new();
+            let name_key = NSString::from_str("name");
+            let name_val = NSString::from_str(title);
+            let body_key = NSString::from_str("body");
+            let body_val = NSString::from_str(content);
+            // setValue:forKey: accepts any NSObject, so we coerce via AnyObject.
+            let _: () = msg_send![&*props, setValue: &*name_val, forKey: &*name_key];
+            let _: () = msg_send![&*props, setValue: &*body_val, forKey: &*body_key];
+
+            // Alloc + initWithProperties: (SBObject initialiser that pre-populates fields).
             let raw_alloc: *mut AnyObject = msg_send![&*note_cls, alloc];
             if raw_alloc.is_null() {
                 anyhow::bail!("Failed to allocate note object");
             }
-            let raw_init: *mut AnyObject = msg_send![raw_alloc, init];
+            let raw_init: *mut AnyObject = msg_send![raw_alloc, initWithProperties: &*props];
             let note = Retained::from_raw(raw_init)
                 .ok_or_else(|| anyhow!("Failed to initialize note object"))?;
 
+            // Insert the fully-initialised proxy into the notes collection.
             let arr = app_notes(&self.sb_app);
             let _: () = msg_send![&*arr, insertObject: &*note, atIndex: 0usize];
 
-            kvc_set(&note, "name", title);
-            kvc_set(&note, "body", content);
             debug!("note created");
+
+            // Instead of trying to use KVC on an unresolved SBProxyByCode,
+            // we will query the properties using the object retrieved from the array.
+            // Since we just inserted it at index 0, it is at index 0.
+            let resolved: Retained<AnyObject> = sb_at(&arr, 0);
+
+            let id = kvc_string(&resolved, "id");
+            let c_dt = kvc_string(&resolved, "creationDate");
+            let m_dt = kvc_string(&resolved, "modificationDate");
+
+            Ok(PartialNoteInfo {
+                id,
+                title: Some(title.to_string()),
+                body: Some(content.to_string()),
+                creation_date: Some(c_dt),
+                modification_date: Some(m_dt),
+            })
         }
-        Ok(())
     }
 
     #[instrument(skip(self, content))]
@@ -298,23 +327,34 @@ impl NotesApp {
         title: &str,
         new_title: Option<&str>,
         content: Option<&str>,
-    ) -> Result<bool> {
+    ) -> Result<Option<PartialNoteInfo>> {
         unsafe {
             let arr = app_notes(&self.sb_app);
             let names = kvc_string_vec(&arr, "name");
             if let Some(i) = names.iter().position(|n| n == title) {
                 let note = sb_at(&arr, i);
-                if let Some(t) = new_title {
-                    kvc_set(&note, "name", t);
-                }
                 if let Some(c) = content {
                     kvc_set(&note, "body", c);
                 }
+                if let Some(t) = new_title {
+                    kvc_set(&note, "name", t);
+                }
                 debug!("note updated");
-                return Ok(true);
+                let id = kvc_string(&note, "id");
+                let t_res = new_title.map(|s| s.to_string());
+                let b_res = content.map(|s| s.to_string());
+                let m_dt = kvc_string(&note, "modificationDate");
+
+                return Ok(Some(PartialNoteInfo {
+                    id,
+                    title: t_res,
+                    body: b_res,
+                    creation_date: None,
+                    modification_date: Some(m_dt),
+                }));
             }
             debug!("note not found");
-            Ok(false)
+            Ok(None)
         }
     }
 
@@ -324,9 +364,9 @@ impl NotesApp {
             let arr = app_notes(&self.sb_app);
             let names = kvc_string_vec(&arr, "name");
             if let Some(i) = names.iter().position(|n| n == title) {
-                let note = sb_at(&arr, i);
-                let sel = objc2::sel!(delete:);
-                let _: () = msg_send![&self.sb_app, performSelector: sel, withObject: &*note];
+                // We can't call `delete` directly on SBObject because it's dynamically resolved.
+                // The correct way in Scripting Bridge to delete an object is to remove it from its parent array.
+                let _: () = msg_send![&*arr, removeObjectAtIndex: i];
                 debug!("note deleted");
                 return Ok(true);
             }

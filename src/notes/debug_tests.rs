@@ -189,8 +189,8 @@ fn debug_create_update_delete() {
             Some("<div>updated body</div>"),
         )
         .unwrap();
-    println!("update returned: {}", ok);
-    assert!(ok);
+    println!("update returned: {:?}", ok);
+    assert!(ok.is_some());
 
     let note = app
         .get_note_by_title("__debug_test_note_renamed__")

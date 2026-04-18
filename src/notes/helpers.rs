@@ -1,7 +1,7 @@
 use objc2::__framework_prelude::{AnyObject, Retained};
 use objc2::msg_send;
 use objc2::runtime::Sel;
-use objc2_foundation::NSString;
+use objc2_foundation::{NSArray, NSString};
 
 /// Read a scripting property as a plain `String` via KVC + `description`.
 /// Works for NSString (returns the string itself) and NSDate (returns its description).
@@ -59,41 +59,43 @@ pub(super) unsafe fn sb_at(arr: &AnyObject, index: usize) -> Retained<AnyObject>
 ///
 /// Calls `valueForKey:` on the *collection* (not individual elements), which
 /// ScriptingBridge translates into a single "get all elements' <key>" Apple
-/// Event. The result is a plain NSArray — subsequent iteration is local (no
-/// further Apple Events). This reduces O(2N) Apple Events to O(1).
+/// Event. The result is a plain `NSArray` — iteration is then local with no
+/// further Apple Events. Cost: O(1) Apple Events instead of O(2N).
 pub(super) unsafe fn kvc_string_vec(collection: &AnyObject, key: &str) -> Vec<String> {
-    match unsafe { kvc_get(collection, key) } {
-        None => Vec::new(),
-        Some(arr) => {
-            let count = unsafe { sb_count(&arr) };
-            (0..count)
-                .map(|i| {
-                    let elem = unsafe { sb_at(&arr, i) };
-                    let desc: Retained<NSString> = unsafe { msg_send![&*elem, description] };
-                    desc.to_string()
-                })
-                .collect()
-        }
-    }
+    let Some(raw) = (unsafe { kvc_get(collection, key) }) else {
+        return Vec::new();
+    };
+    // valueForKey: on an SBElementArray returns a plain NSArray.
+    // Downcast so we can use the safe NSArray::iter() from objc2-foundation
+    // instead of manual index arithmetic with msg_send!.
+    let Some(arr) = raw.downcast_ref::<NSArray<AnyObject>>() else {
+        return Vec::new();
+    };
+    arr.iter()
+        .map(|elem| {
+            // iter() yields Retained<AnyObject>; &*elem coerces to &AnyObject for msg_send!
+            let desc: Retained<NSString> = unsafe { msg_send![&*elem, description] };
+            desc.to_string()
+        })
+        .collect()
 }
 
 /// Batch-fetch a boolean property from every element in an SBElementArray.
 ///
 /// Same single-Apple-Event strategy as `kvc_string_vec`.
 pub(super) unsafe fn kvc_bool_vec(collection: &AnyObject, key: &str) -> Vec<bool> {
-    match unsafe { kvc_get(collection, key) } {
-        None => Vec::new(),
-        Some(arr) => {
-            let count = unsafe { sb_count(&arr) };
-            (0..count)
-                .map(|i| {
-                    let elem = unsafe { sb_at(&arr, i) };
-                    let n: i8 = unsafe { msg_send![&*elem, charValue] };
-                    n != 0
-                })
-                .collect()
-        }
-    }
+    let Some(raw) = (unsafe { kvc_get(collection, key) }) else {
+        return Vec::new();
+    };
+    let Some(arr) = raw.downcast_ref::<NSArray<AnyObject>>() else {
+        return Vec::new();
+    };
+    arr.iter()
+        .map(|elem| {
+            let n: i8 = unsafe { msg_send![&*elem, charValue] };
+            n != 0
+        })
+        .collect()
 }
 
 /// Retrieve a ScriptingBridge element collection via `performSelector:`.

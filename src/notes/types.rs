@@ -40,6 +40,16 @@ pub struct NoteInfo {
     pub password_protected: bool,
 }
 
+/// Partial metadata for newly created or updated note, avoiding expensive fetches.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PartialNoteInfo {
+    pub id: String,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub creation_date: Option<String>,
+    pub modification_date: Option<String>,
+}
+
 #[allow(dead_code)]
 /// A file attachment embedded in a note.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

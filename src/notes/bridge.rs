@@ -2,29 +2,20 @@ use super::helpers::{
     kvc_bool, kvc_bool_vec, kvc_string, kvc_string_vec, sb_at, sb_collection, sb_count,
 };
 use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
-use objc2::extern_class;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2_foundation::NSObject;
 
-#[link(name = "ScriptingBridge", kind = "framework")]
-unsafe extern "C" {}
-
-extern_class!(
-    #[unsafe(super(NSObject))]
-    pub struct SBObject;
-);
-
-extern_class!(
-    #[unsafe(super(SBObject, NSObject))]
-    pub struct SBApplication;
-);
+// Re-export from the official objc2-scripting-bridge crate.
+// This replaces the hand-rolled extern_class! definitions and automatically
+// links the ScriptingBridge framework.
+pub use objc2_scripting_bridge::SBApplication;
 
 pub(super) unsafe fn app_notes(app: &AnyObject) -> Retained<AnyObject> {
     unsafe { sb_collection(app, objc2::sel!(notes)) }
 }
 pub(super) unsafe fn app_accounts(app: &SBApplication) -> Retained<AnyObject> {
-    unsafe { sb_collection(app, objc2::sel!(accounts)) }
+    // SBApplication: AsRef<AnyObject> via Deref chain (→SBObject→NSObject→AnyObject)
+    unsafe { sb_collection(app.as_ref(), objc2::sel!(accounts)) }
 }
 pub(super) unsafe fn obj_notes(obj: &AnyObject) -> Retained<AnyObject> {
     unsafe { sb_collection(obj, objc2::sel!(notes)) }

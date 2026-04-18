@@ -1,4 +1,4 @@
-use crate::notes::{AccountInfo, FolderInfo, NoteInfo};
+use crate::notes::{AccountInfo, FolderInfo, NoteInfo, PartialNoteInfo};
 use rmcp::schemars;
 use rmcp::serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
@@ -72,4 +72,6 @@ pub(crate) struct AccountsResponse {
 pub(crate) struct WriteResponse {
     /// `true` if the note was found and the operation applied.
     pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<PartialNoteInfo>,
 }
