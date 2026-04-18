@@ -1,7 +1,11 @@
+use crate::models::{
+    AccountRequest, AccountsResponse, AttachmentsResponse, CreateNoteRequest, EmptyRequest,
+    FolderRequest, FoldersResponse, NoteResponse, NoteTitlesResponse, NotesResponse, TitleRequest,
+    UpdateNoteRequest, WriteResponse,
+};
 use crate::notes::NotesApp;
-use crate::notes::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::{Json, schemars, tool, tool_router};
+use rmcp::{tool, tool_router, Json};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -14,82 +18,6 @@ impl AppleNotesMCP {
     pub fn new(app: NotesApp) -> Self {
         Self { app: Arc::new(app) }
     }
-}
-
-#[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
-pub(crate) struct EmptyRequest {}
-
-#[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
-pub(crate) struct TitleRequest {
-    /// Title of the note.
-    title: String,
-}
-
-#[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
-pub(crate) struct FolderRequest {
-    /// Name of the folder.
-    folder: String,
-}
-
-#[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
-pub(crate) struct AccountRequest {
-    /// Name of the account (e.g. "iCloud" or "On My Mac").
-    account: String,
-}
-
-#[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
-pub(crate) struct CreateNoteRequest {
-    /// Title of the new note.
-    title: String,
-    /// HTML body of the new note.
-    content: String,
-}
-
-#[derive(Clone, serde::Deserialize, schemars::JsonSchema)]
-pub(crate) struct UpdateNoteRequest {
-    /// Current title of the note to update.
-    title: String,
-    /// New title (omit to keep unchanged).
-    new_title: Option<String>,
-    /// New HTML body (omit to keep unchanged).
-    new_content: Option<String>,
-}
-
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct NoteTitlesResponse {
-    titles: Vec<String>,
-}
-
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct NotesResponse {
-    notes: Vec<NoteInfo>,
-}
-
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct NoteResponse {
-    /// `null` when no note with the requested title was found.
-    note: Option<NoteInfo>,
-}
-
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct FoldersResponse {
-    folders: Vec<FolderInfo>,
-}
-
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct AccountsResponse {
-    accounts: Vec<AccountInfo>,
-}
-
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct AttachmentsResponse {
-    attachments: Vec<AttachmentInfo>,
-}
-
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct WriteResponse {
-    /// `true` if the note was found and the operation applied.
-    success: bool,
 }
 
 #[tool_router(server_handler)]

@@ -1,5 +1,6 @@
 mod mcp;
 mod notes;
+mod models;
 
 use anyhow::{Context, Result};
 use mcp::AppleNotesMCP;
