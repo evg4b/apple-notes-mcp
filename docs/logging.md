@@ -3,25 +3,25 @@
 ## Log file
 
 All output goes to a log file — stdout is reserved for the MCP stdio transport.
-The file output is plain text, with ANSI terminal color codes disabled for readability.
+The file output is plain text, with ANSI terminal color codes disabled.
 
-|              |                                         |
-|--------------|-----------------------------------------|
-| Default path | `~/Library/Logs/apple-notes-mcp.log`    |
-| Override     | `APPLE_NOTES_MCP_LOG=/path/to/file.log` |
-| Verbosity    | `RUST_LOG=debug` (default: `info`)      |
+|              |                                                            |
+|--------------|------------------------------------------------------------|
+| Default path | `~/Library/Logs/apple-notes-mcp/apple-notes-mcp.log`      |
+| Override     | `--log-file /path/to/file.log`                             |
+| Level        | `--log-level <error\|warn\|info\|debug\|trace>` (default: `error`) |
 
-### RUST_LOG examples
+### Examples
 
 ```sh
-# Default — info and above
-RUST_LOG=info
+# Use a custom log file
+apple-notes-mcp --log-file /tmp/notes-debug.log
 
-# Full debug output
-RUST_LOG=debug
+# Enable debug output
+apple-notes-mcp --log-level debug
 
-# Quiet rmcp, verbose server only
-RUST_LOG=apple_notes_mcp=trace,rmcp=warn
+# Both together
+apple-notes-mcp --log-level debug --log-file /tmp/notes-debug.log
 ```
 
 ---
@@ -53,8 +53,8 @@ registers the `com.apple.Notes` bundle ID, then restart the server.
 
 ### Notes are found but body is empty
 
-Password-protected notes return an empty `body` and `plaintext`. Check the
-`password_protected` field on the [NoteInfo](tools.md#noteinfo) object.
+Password-protected notes return an empty `body`. Check the `password_protected` field on the
+[NoteInfo](tools.md#noteinfo) object.
 
 ---
 
