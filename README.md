@@ -16,6 +16,15 @@ exposes Apple Notes to AI assistants via the stdio transport. It talks directly 
 through [ScriptingBridge](https://developer.apple.com/documentation/scriptingbridge) - no cloud
 API, no extra processes, no background daemon.
 
+> [!WARNING]
+> This tool uses the ScriptingBridge API, which Apple does not officially support.
+> It's a low-level interface that may change in future macOS releases.
+> **Use at your own risk**.
+
+> [!Note]
+> This tool uses the ScriptingBridge API, which has no perfect performance.
+> Please do not use it as memory storage for models.
+
 ## Installation
 
 ```sh
@@ -35,7 +44,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "apple-notes": {
-      "command": "/usr/local/bin/apple-notes-mcp"
+      "command": "/usr/local/bin/apple-notes-mcp",
+      "args": ["--scopes", "read,write,delete"]
     }
   }
 }

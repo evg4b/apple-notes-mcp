@@ -35,15 +35,15 @@ This is a macOS MCP (Model Context Protocol) server that exposes Apple Notes to 
 
 ### Layer breakdown
 
-| Module | Role |
-|--------|------|
-| `src/mcp.rs` | MCP tool definitions via `rmcp` `#[tool]` / `#[tool_router]` macros; scope-gated |
-| `src/models.rs` | Request/response types (`serde` + `schemars` JSON Schema) |
-| `src/notes/api.rs` | `NotesApp` — all public business logic; unit tests live here |
-| `src/notes/bridge.rs` | Low-level Objective-C bridge: `SBApplication`/`SBObject` extern classes, batch-fetch helpers |
-| `src/notes/helpers.rs` | KVC helpers (`kvc_string`, `kvc_bool`, `sb_count`, etc.); fully unit-tested without Notes.app |
-| `src/notes/types.rs` | Plain data types: `NoteInfo`, `FolderInfo`, `AccountInfo` |
-| `src/notes/debug_tests.rs` | Manual `#[ignore]` tests requiring live Notes.app |
+| Module                     | Role                                                                                          |
+|----------------------------|-----------------------------------------------------------------------------------------------|
+| `src/mcp.rs`               | MCP tool definitions via `rmcp` `#[tool]` / `#[tool_router]` macros; scope-gated              |
+| `src/models.rs`            | Request/response types (`serde` + `schemars` JSON Schema)                                     |
+| `src/notes/api.rs`         | `NotesApp` — all public business logic; unit tests live here                                  |
+| `src/notes/bridge.rs`      | Low-level Objective-C bridge: `SBApplication`/`SBObject` extern classes, batch-fetch helpers  |
+| `src/notes/helpers.rs`     | KVC helpers (`kvc_string`, `kvc_bool`, `sb_count`, etc.); fully unit-tested without Notes.app |
+| `src/notes/types.rs`       | Plain data types: `NoteInfo`, `FolderInfo`, `AccountInfo`                                     |
+| `src/notes/debug_tests.rs` | Manual `#[ignore]` tests requiring live Notes.app                                             |
 
 ### Data flow
 ```

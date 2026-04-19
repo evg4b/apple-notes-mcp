@@ -3,7 +3,7 @@ use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_foundation::{NSMutableDictionary, NSObject, NSString};
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use super::bridge::SBApplication;
 use super::bridge::{
@@ -29,7 +29,12 @@ static APPLE_NOTES_BUNDLE_ID: &str = "com.apple.Notes";
 impl NotesApp {
     pub fn connect() -> Result<Self> {
         let bundle_id = NSString::from_str(APPLE_NOTES_BUNDLE_ID);
-        // Use the typed constructor from objc2-scripting-bridge — no manual msg_send! needed.
+
+        trace!(
+            bundle_id = %bundle_id.to_string(),
+            "connecting to Notes.app via ScriptingBridge...",
+        );
+
         let retained_app: Option<Retained<SBApplication>> =
             unsafe { SBApplication::applicationWithBundleIdentifier(&bundle_id) };
 
@@ -50,7 +55,8 @@ impl NotesApp {
                 info!(accounts = accounts.len(), "Notes.app connected");
             }
             Err(e) => {
-                warn!(error = %e, "Notes.app probe failed — check Automation permission");
+                error!(error = %e, "Notes.app probe failed — check Automation permission");
+                return Err(e);
             }
         }
 

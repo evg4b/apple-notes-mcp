@@ -1,39 +1,12 @@
-use crate::models::{
-    AccountRequest, AccountsResponse, CreateNoteRequest, EmptyRequest, FolderRequest,
-    FoldersResponse, NoteResponse, NoteTitlesResponse, NotesResponse, TitleRequest,
-    UpdateNoteRequest, WriteResponse,
+use super::AppleNotesMCP;
+use super::models::{
+    AccountRequest, AccountsResponse, EmptyRequest, FolderRequest, FoldersResponse, NoteResponse,
+    NoteTitlesResponse, NotesResponse, TitleRequest,
 };
-use crate::notes::NotesApp;
-use clap::ValueEnum;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::{tool, tool_router, Json};
-use std::sync::Arc;
+use rmcp::{Json, tool};
 use tracing::{debug, info, warn};
 
-#[derive(ValueEnum, Clone, Debug, PartialEq)]
-pub enum Scope {
-    Read,
-    Write,
-    Delete,
-}
-
-#[derive(Clone)]
-pub struct AppleNotesMCP {
-    app: Arc<NotesApp>,
-    #[allow(unused)]
-    scopes: Vec<Scope>,
-}
-
-impl AppleNotesMCP {
-    pub fn new(app: NotesApp, scopes: Vec<Scope>) -> Self {
-        Self {
-            app: Arc::new(app),
-            scopes,
-        }
-    }
-}
-
-#[tool_router(server_handler)]
 impl AppleNotesMCP {
     #[tool(
         description = "Return the titles of every note. Fast: skips body content. \
@@ -181,70 +154,5 @@ impl AppleNotesMCP {
             .unwrap_or_default();
         info!(tool = "list_accounts", count = accounts.len(), "ok");
         Ok(Json(AccountsResponse { accounts }))
-    }
-
-    #[tool(description = "Create a new note in the default folder. \
-                          content must be an HTML string, e.g. \"<b>Hello</b> world\". \
-                          Use plain text wrapped in <div> tags if no formatting is needed.")]
-    pub fn create_note(
-        &self,
-        p: Parameters<CreateNoteRequest>,
-    ) -> Result<Json<WriteResponse>, String> {
-        debug!(tool = "create_note", "called");
-        let note = self
-            .app
-            .create_note(&p.0.title, &p.0.content)
-            .inspect_err(|e| warn!(error = %e, "create_note failed"))
-            .ok();
-        let success = note.is_some();
-        info!(tool = "create_note", success, "ok");
-        Ok(Json(WriteResponse { success, note }))
-    }
-
-    #[tool(
-        description = "Update the title and/or HTML body of an existing note by exact title. \
-                          Omit new_title or new_content to leave that field unchanged. \
-                          Returns success=false when no note with that title is found."
-    )]
-    pub fn update_note(
-        &self,
-        p: Parameters<UpdateNoteRequest>,
-    ) -> Result<Json<WriteResponse>, String> {
-        debug!(
-            tool = "update_note",
-            new_title = p.0.new_title.as_deref().unwrap_or("<unchanged>"),
-            "called"
-        );
-        let note = self
-            .app
-            .update_note(
-                &p.0.title,
-                p.0.new_title.as_deref(),
-                p.0.new_content.as_deref(),
-            )
-            .inspect_err(|e| warn!(error = %e, "update_note failed"))
-            .ok()
-            .flatten();
-        let success = note.is_some();
-        info!(tool = "update_note", success, "ok");
-        Ok(Json(WriteResponse { success, note }))
-    }
-
-    #[tool(
-        description = "Permanently delete a note by exact title. Cannot be undone. \
-                          Returns success=false when no note with that title is found."
-    )]
-    pub fn delete_note(&self, p: Parameters<TitleRequest>) -> Result<Json<WriteResponse>, String> {
-        debug!(tool = "delete_note", "called");
-        let success = self
-            .app
-            .delete_note(&p.0.title)
-            .inspect_err(|e| warn!(error = %e, "delete_note failed"))
-            .unwrap_or(false);
-        info!(tool = "delete_note", success, "ok");
-        Ok(Json(WriteResponse {
-            success,
-            note: None,
-        }))
     }
 }

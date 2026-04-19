@@ -1,7 +1,6 @@
 mod cli;
 mod log;
 mod mcp;
-mod models;
 mod notes;
 
 use anyhow::Result;
