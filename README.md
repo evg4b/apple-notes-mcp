@@ -27,6 +27,18 @@ API, no osascript, no spawned child processes, no background daemon.
 
 ## Installation
 
+### Using Homebrew
+
+```shell
+brew install evg4b/tap/apple-notes-mcp
+```
+
+### Using Stew
+
+```shell
+stew install evg4b/apple-notes-mcp
+```
+
 ### Pre-built binaries
 
 Download the binary for your architecture from the
@@ -65,7 +77,10 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "apple-notes": {
       "command": "/usr/local/bin/apple-notes-mcp",
-      "args": ["--scopes", "read,write,delete"]
+      "args": [
+        "--scopes",
+        "read,write,delete"
+      ]
     }
   }
 }
@@ -100,11 +115,11 @@ Options:
 
 ### Scopes
 
-| Scope    | Tools enabled                                                                 |
-|----------|-------------------------------------------------------------------------------|
+| Scope    | Tools enabled                                                                                                                               |
+|----------|---------------------------------------------------------------------------------------------------------------------------------------------|
 | `read`   | `list_notes`, `get_note`, `get_all_notes`, `get_notes_in_folder`, `get_notes_in_account`, `list_folders`, `get_subfolders`, `list_accounts` |
-| `write`  | `create_note`, `update_note`                                                  |
-| `delete` | `delete_note`                                                                 |
+| `write`  | `create_note`, `update_note`                                                                                                                |
+| `delete` | `delete_note`                                                                                                                               |
 
 `read` is always enabled by default. Combine scopes as needed:
 
