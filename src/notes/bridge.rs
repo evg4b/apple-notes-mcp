@@ -95,8 +95,12 @@ pub(super) unsafe fn collect_notes_in_folder(
     folder: &AnyObject,
     folder_name: &str,
     account_name: &str,
+    ceiling: usize,
     out: &mut Vec<NoteInfo>,
 ) {
+    if out.len() >= ceiling {
+        return;
+    }
     let notes_arr = unsafe { obj_notes(folder) };
     let count = unsafe { sb_count(&notes_arr) };
     if count == 0 {
@@ -110,8 +114,11 @@ pub(super) unsafe fn collect_notes_in_folder(
     let shared = unsafe { kvc_bool_vec(&notes_arr, keys::shared()) };
     let protected = unsafe { kvc_bool_vec(&notes_arr, keys::password_protected()) };
 
-    out.reserve(count);
+    out.reserve(count.min(ceiling - out.len()));
     for i in 0..count {
+        if out.len() >= ceiling {
+            return;
+        }
         out.push(NoteInfo {
             id: take_at(&mut ids, i),
             title: take_at(&mut names, i),
@@ -130,19 +137,23 @@ pub(super) unsafe fn collect_notes_in_folder(
 pub(super) unsafe fn collect_notes_in_folders(
     folders_arr: &AnyObject,
     account_name: &str,
+    ceiling: usize,
     out: &mut Vec<NoteInfo>,
 ) {
     let count = unsafe { sb_count(folders_arr) };
-    if count == 0 {
+    if count == 0 || out.len() >= ceiling {
         return;
     }
     let mut names = unsafe { kvc_string_vec(folders_arr, keys::name()) };
     for i in 0..count {
+        if out.len() >= ceiling {
+            return;
+        }
         let folder = unsafe { sb_at(folders_arr, i) };
         let folder_name = take_at(&mut names, i);
-        unsafe { collect_notes_in_folder(&folder, &folder_name, account_name, out) };
+        unsafe { collect_notes_in_folder(&folder, &folder_name, account_name, ceiling, out) };
         let sub_arr = unsafe { obj_folders(&folder) };
-        unsafe { collect_notes_in_folders(&sub_arr, account_name, out) };
+        unsafe { collect_notes_in_folders(&sub_arr, account_name, ceiling, out) };
     }
 }
 

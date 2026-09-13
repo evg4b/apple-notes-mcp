@@ -12,6 +12,7 @@ use super::api::NotesApp;
 const TEST_NOTE: &str = "__apple_notes_mcp_test_note__";
 const RENAMED_NOTE: &str = "__apple_notes_mcp_test_note_renamed__";
 const TEST_FOLDER: &str = "__apple_notes_mcp_test_folder__";
+const LIMIT: usize = 1000;
 const MISSING: &str = "__apple_notes_mcp_test_missing_xyzzy__";
 
 fn app() -> NotesApp {
@@ -74,7 +75,7 @@ fn note_titles_are_listed() {
 #[test]
 #[ignore = "requires Notes.app with Automation permission"]
 fn all_notes_are_fully_populated() {
-    let notes = app().get_all_notes().unwrap();
+    let notes = app().get_all_notes(LIMIT).unwrap().notes;
     let first = notes.first().expect("expected at least one note");
     assert!(!first.id.is_empty(), "empty id: {first:?}");
     assert!(!first.creation_date.is_empty(), "empty created: {first:?}");
@@ -105,7 +106,7 @@ fn notes_in_folder_report_that_folder() {
     let app = app();
     let folders = app.list_folders().unwrap();
     let folder = folders.first().expect("expected at least one folder");
-    for note in app.get_notes_in_folder(&folder.name).unwrap() {
+    for note in app.get_notes_in_folder(&folder.name, LIMIT).unwrap().notes {
         assert_eq!(note.folder, folder.name);
     }
 }
@@ -116,7 +117,11 @@ fn notes_in_account_report_that_account() {
     let app = app();
     let accounts = app.list_accounts().unwrap();
     let account = accounts.first().expect("expected at least one account");
-    for note in app.get_notes_in_account(&account.name).unwrap() {
+    for note in app
+        .get_notes_in_account(&account.name, LIMIT)
+        .unwrap()
+        .notes
+    {
         assert_eq!(note.account, account.name);
     }
 }
@@ -125,8 +130,18 @@ fn notes_in_account_report_that_account() {
 #[ignore = "requires Notes.app with Automation permission"]
 fn notes_in_missing_folder_or_account_are_empty() {
     let app = app();
-    assert!(app.get_notes_in_folder(MISSING).unwrap().is_empty());
-    assert!(app.get_notes_in_account(MISSING).unwrap().is_empty());
+    assert!(
+        app.get_notes_in_folder(MISSING, LIMIT)
+            .unwrap()
+            .notes
+            .is_empty()
+    );
+    assert!(
+        app.get_notes_in_account(MISSING, LIMIT)
+            .unwrap()
+            .notes
+            .is_empty()
+    );
 }
 
 #[test]
@@ -139,7 +154,8 @@ fn search_finds_a_note_by_a_fragment_of_its_title() {
 
     let hits = app
         .search_notes("apple_notes_mcp_test_note", false, 10)
-        .unwrap();
+        .unwrap()
+        .notes;
     assert!(
         hits.iter().any(|n| n.title == TEST_NOTE),
         "search missed the note it should have found"
@@ -158,12 +174,14 @@ fn search_is_case_insensitive_and_can_match_bodies() {
 
     let body_hits = app
         .search_notes("distinctive haystack token", true, 10)
-        .unwrap();
+        .unwrap()
+        .notes;
     assert!(body_hits.iter().any(|n| n.title == TEST_NOTE));
 
     let title_only = app
         .search_notes("distinctive haystack token", false, 10)
-        .unwrap();
+        .unwrap()
+        .notes;
     assert!(!title_only.iter().any(|n| n.title == TEST_NOTE));
 
     clean(&app);
@@ -173,14 +191,62 @@ fn search_is_case_insensitive_and_can_match_bodies() {
 #[ignore = "requires Notes.app with Automation permission"]
 fn search_respects_the_limit() {
     let app = app();
-    assert!(app.search_notes("e", true, 3).unwrap().len() <= 3);
-    assert!(app.search_notes("e", true, 0).unwrap().is_empty());
+    assert!(app.search_notes("e", true, 3).unwrap().notes.len() <= 3);
+    assert!(app.search_notes("e", true, 0).unwrap().notes.is_empty());
+}
+
+#[test]
+#[ignore = "requires Notes.app with Automation permission"]
+fn a_bulk_read_stops_at_the_limit_and_says_so() {
+    let app = app();
+    let all = app.get_all_notes(LIMIT).unwrap();
+    assert!(!all.truncated, "library is larger than the test limit");
+
+    let page = app.get_all_notes(1).unwrap();
+    if all.notes.len() > 1 {
+        assert_eq!(page.notes.len(), 1);
+        assert!(page.truncated, "a cut-off page should say it was cut off");
+    }
+}
+
+#[test]
+#[ignore = "requires Notes.app with Automation permission"]
+fn an_exact_fit_is_not_reported_as_truncated() {
+    let app = app();
+    let total = app.get_all_notes(LIMIT).unwrap().notes.len();
+    let page = app.get_all_notes(total).unwrap();
+    assert_eq!(page.notes.len(), total);
+    assert!(!page.truncated, "an exact fit is not truncated");
+}
+
+#[test]
+#[ignore = "requires Notes.app with Automation permission"]
+fn stored_bodies_are_html() {
+    let app = app();
+    clean(&app);
+    app.create_note(TEST_NOTE, "<div><b>bold</b> text</div>", None)
+        .unwrap();
+
+    let note = app.get_note_by_title(TEST_NOTE).unwrap().unwrap();
+    assert!(
+        note.body.contains('<'),
+        "the notes layer should return raw HTML: {:?}",
+        note.body
+    );
+
+    clean(&app);
 }
 
 #[test]
 #[ignore = "requires Notes.app with Automation permission"]
 fn search_for_a_missing_term_is_empty() {
-    assert!(app().search_notes(MISSING, true, 10).unwrap().is_empty());
+    assert!(
+        app()
+            .search_notes(MISSING, true, 10)
+            .unwrap()
+            .notes
+            .is_empty()
+    );
 }
 
 #[test]

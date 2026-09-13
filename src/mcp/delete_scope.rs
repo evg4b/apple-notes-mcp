@@ -6,8 +6,8 @@ use tracing::{info, warn};
 
 impl AppleNotesMCP {
     #[tool(
-        description = "Permanently delete a note by exact title. Cannot be undone. \
-                       Returns success=false when no note with that title is found."
+        description = "Delete a note by exact title. Cannot be undone — it does not go \
+                       to Recently Deleted."
     )]
     pub fn delete_note(&self, p: Parameters<TitleRequest>) -> Result<Json<WriteResponse>, String> {
         let response = match self.app.delete_note(&p.0.title) {
@@ -26,9 +26,8 @@ impl AppleNotesMCP {
     }
 
     #[tool(
-        description = "Permanently delete a top-level folder and every note inside it, \
-                       matched by exact name. Cannot be undone. Returns success=false \
-                       when no folder with that name is found."
+        description = "Delete a folder and every note in it, by exact name. Cannot be \
+                       undone."
     )]
     pub fn delete_folder(
         &self,

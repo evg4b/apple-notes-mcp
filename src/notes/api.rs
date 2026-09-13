@@ -13,7 +13,7 @@ use super::bridge::{
 use super::helpers::{
     keys, kvc_index_of, kvc_set, kvc_string, kvc_string_vec, sb_at, sb_count, sb_perform,
 };
-use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo, PartialNoteInfo};
+use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo, NotePage, PartialNoteInfo};
 
 /// A live ScriptingBridge proxy to Notes.app.
 pub struct NotesApp {
@@ -105,16 +105,19 @@ impl NotesApp {
         }
     }
 
+    /// Every note, capped at `limit`. One note past the cap is collected so the
+    /// caller can report whether anything was left behind.
     #[instrument(skip(self))]
-    pub fn get_all_notes(&self) -> Result<Vec<NoteInfo>> {
+    pub fn get_all_notes(&self, limit: usize) -> Result<NotePage> {
         unsafe {
+            let ceiling = limit.saturating_add(1);
             let mut out = Vec::new();
             self.for_each_account(|account, account_name| {
                 let folders_arr = obj_folders(account);
-                collect_notes_in_folders(&folders_arr, account_name, &mut out);
+                collect_notes_in_folders(&folders_arr, account_name, ceiling, &mut out);
             });
             debug!(total = out.len(), "collected all notes");
-            Ok(out)
+            Ok(NotePage::from_overshoot(out, limit))
         }
     }
 
@@ -147,31 +150,33 @@ impl NotesApp {
     }
 
     #[instrument(skip(self))]
-    pub fn get_notes_in_folder(&self, folder_name: &str) -> Result<Vec<NoteInfo>> {
+    pub fn get_notes_in_folder(&self, folder_name: &str, limit: usize) -> Result<NotePage> {
         unsafe {
+            let ceiling = limit.saturating_add(1);
             let mut out = Vec::new();
             self.with_folder(folder_name, |folder, account_name| {
-                collect_notes_in_folder(folder, folder_name, account_name, &mut out);
+                collect_notes_in_folder(folder, folder_name, account_name, ceiling, &mut out);
             });
             debug!(count = out.len(), "collected notes in folder");
-            Ok(out)
+            Ok(NotePage::from_overshoot(out, limit))
         }
     }
 
     #[instrument(skip(self))]
-    pub fn get_notes_in_account(&self, account_name: &str) -> Result<Vec<NoteInfo>> {
+    pub fn get_notes_in_account(&self, account_name: &str, limit: usize) -> Result<NotePage> {
         unsafe {
             let accounts_arr = app_accounts(&self.sb_app);
             let target = NSString::from_str(account_name);
             let Some(i) = kvc_index_of(&accounts_arr, keys::name(), &target) else {
                 debug!("account not found");
-                return Ok(Vec::new());
+                return Ok(NotePage::from_overshoot(Vec::new(), limit));
             };
             let account = sb_at(&accounts_arr, i);
+            let ceiling = limit.saturating_add(1);
             let mut out = Vec::new();
-            collect_notes_in_folders(&obj_folders(&account), account_name, &mut out);
+            collect_notes_in_folders(&obj_folders(&account), account_name, ceiling, &mut out);
             debug!(count = out.len(), "collected notes in account");
-            Ok(out)
+            Ok(NotePage::from_overshoot(out, limit))
         }
     }
 
@@ -180,10 +185,11 @@ impl NotesApp {
     /// `limit` caps the number of results so a broad query cannot pull an entire
     /// library into memory.
     #[instrument(skip(self))]
-    pub fn search_notes(&self, query: &str, in_body: bool, limit: usize) -> Result<Vec<NoteInfo>> {
+    pub fn search_notes(&self, query: &str, in_body: bool, limit: usize) -> Result<NotePage> {
         if limit == 0 {
-            return Ok(Vec::new());
+            return Ok(NotePage::from_overshoot(Vec::new(), 0));
         }
+        let ceiling = limit.saturating_add(1);
         let needle = query.to_lowercase();
         let fields = SearchFields {
             title: true,
@@ -192,7 +198,7 @@ impl NotesApp {
         unsafe {
             let mut out = Vec::new();
             self.for_each_account(|account, account_name| {
-                if out.len() >= limit {
+                if out.len() >= ceiling {
                     return;
                 }
                 let folders_arr = obj_folders(account);
@@ -201,12 +207,12 @@ impl NotesApp {
                     account_name,
                     &needle,
                     fields,
-                    limit,
+                    ceiling,
                     &mut out,
                 );
             });
             debug!(matches = out.len(), "search complete");
-            Ok(out)
+            Ok(NotePage::from_overshoot(out, limit))
         }
     }
 

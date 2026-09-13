@@ -30,10 +30,8 @@ fn note_result(
 
 impl AppleNotesMCP {
     #[tool(
-        description = "Create a new note. content must be an HTML string, e.g. \
-                       \"<b>Hello</b> world\"; wrap plain text in <div> tags if no \
-                       formatting is needed. Pass folder to place the note in a specific \
-                       folder, otherwise the Notes default folder is used."
+        description = "Create a note. content is HTML — wrap plain text in <div> tags. \
+                       Without folder it lands in the default folder."
     )]
     pub fn create_note(
         &self,
@@ -47,9 +45,9 @@ impl AppleNotesMCP {
     }
 
     #[tool(
-        description = "Replace the title and/or HTML body of an existing note, matched by \
-                       exact title. Omit new_title or new_content to leave that field \
-                       unchanged. Use append_to_note to add to a body without replacing it."
+        description = "Replace a note's title and/or body. Omitted fields stay as they \
+                       are. new_content is HTML and replaces the whole body; read it back \
+                       with get_note format=html first, or use append_to_note instead."
     )]
     pub fn update_note(
         &self,
@@ -64,9 +62,8 @@ impl AppleNotesMCP {
     }
 
     #[tool(
-        description = "Append HTML to the end of an existing note's body, matched by exact \
-                       title. The existing content is preserved. Returns success=false \
-                       when no note with that title is found."
+        description = "Add HTML to the end of a note, keeping what is already there. \
+                       Prefer this over update_note for adding a line."
     )]
     pub fn append_to_note(
         &self,
@@ -77,9 +74,8 @@ impl AppleNotesMCP {
     }
 
     #[tool(
-        description = "Move a note into another folder, both matched by exact name. The \
-                       note keeps its id, dates and attachments. Use list_folders to \
-                       discover valid destination folders."
+        description = "Move a note to another folder, both by exact name. Keeps its id, \
+                       dates and attachments."
     )]
     pub fn move_note(&self, p: Parameters<MoveNoteRequest>) -> Result<Json<WriteResponse>, String> {
         let moved = self.app.move_note(&p.0.title, &p.0.folder);
@@ -87,9 +83,8 @@ impl AppleNotesMCP {
     }
 
     #[tool(
-        description = "Create a top-level folder in an account. Pass account to choose \
-                       which one, otherwise the first account is used. Nested folders are \
-                       not supported."
+        description = "Create a top-level folder, in the first account unless account \
+                       says otherwise. Nested folders are not supported."
     )]
     pub fn create_folder(
         &self,

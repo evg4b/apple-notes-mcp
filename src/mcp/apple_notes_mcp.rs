@@ -208,4 +208,37 @@ mod tests {
             );
         }
     }
+    /// Every client pays for the whole tool list on every session, and many
+    /// keep it in context for every turn afterwards. It is the one payload
+    /// whose size is entirely our choice, so hold it to a budget: a verbose new
+    /// tool description should have to be argued for, not slip in unnoticed.
+    #[test]
+    fn the_tool_list_stays_within_its_budget() {
+        const BUDGET_BYTES: usize = 23_000;
+
+        let scopes = ScopeSet::from_iter([Scope::Read, Scope::Write, Scope::Delete]);
+        let tools = AppleNotesMCP::build_router(scopes).list_all();
+        let bytes = rmcp::serde_json::to_string(&tools).unwrap().len();
+        assert!(
+            bytes <= BUDGET_BYTES,
+            "tools/list is {bytes} bytes, over the {BUDGET_BYTES} budget — \
+             trim a description or a schema rather than raising the ceiling"
+        );
+    }
+
+    #[test]
+    fn no_single_tool_description_runs_long() {
+        const MAX_CHARS: usize = 200;
+
+        let scopes = ScopeSet::from_iter([Scope::Read, Scope::Write, Scope::Delete]);
+        for tool in AppleNotesMCP::build_router(scopes).list_all() {
+            let description = tool.description.as_deref().unwrap_or_default();
+            assert!(
+                description.len() <= MAX_CHARS,
+                "{} has a {}-char description; keep it under {MAX_CHARS}",
+                tool.name,
+                description.len()
+            );
+        }
+    }
 }

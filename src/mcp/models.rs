@@ -1,99 +1,152 @@
-use crate::notes::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo, PartialNoteInfo};
+use crate::notes::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo, NotePage, PartialNoteInfo};
 use rmcp::schemars;
 use rmcp::serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 
-/// Result cap applied when `search_notes` is called without an explicit `limit`.
-pub(crate) const DEFAULT_SEARCH_LIMIT: usize = 50;
+/// Notes returned when a bulk read is called without an explicit `limit`.
+///
+/// Every bulk read is capped: an uncapped one returns every body in the library
+/// and can exhaust a client's context in a single call. Responses say when the
+/// cap cut something off.
+pub(crate) const DEFAULT_NOTE_LIMIT: usize = 50;
+
+// `BodyFormat` and `BodyOptions` are inlined into five tool schemas, so their
+// doc comments are paid for five times over. The prose lives on the `format`
+// field, which is the one a client actually reads.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum BodyFormat {
+    #[default]
+    Text,
+    Html,
+}
+
+#[derive(Clone, Copy, Deserialize, JsonSchema)]
+pub(crate) struct BodyOptions {
+    /// Body rendering: "text" (default, far smaller) or "html".
+    pub format: Option<BodyFormat>,
+    /// Maximum notes to return. Defaults to 50.
+    pub limit: Option<usize>,
+}
+
+impl BodyOptions {
+    pub fn format(&self) -> BodyFormat {
+        self.format.unwrap_or_default()
+    }
+
+    pub fn limit(&self) -> usize {
+        self.limit.unwrap_or(DEFAULT_NOTE_LIMIT)
+    }
+}
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct EmptyRequest {}
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct TitleRequest {
-    /// Title of the note.
+    /// Exact title of the note.
     pub title: String,
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
+pub(crate) struct GetNoteRequest {
+    /// Exact title of the note.
+    pub title: String,
+    /// Body rendering: "text" (default, far smaller) or "html".
+    pub format: Option<BodyFormat>,
+}
+
+#[derive(Clone, Copy, Deserialize, JsonSchema)]
+pub(crate) struct BulkNotesRequest {
+    #[serde(flatten)]
+    pub body: BodyOptions,
+}
+
+#[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct FolderRequest {
-    /// Name of the folder.
+    /// Exact folder name.
     pub folder: String,
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
-pub(crate) struct AccountRequest {
-    /// Name of the account (e.g. "iCloud" or "On My Mac").
+pub(crate) struct FolderNotesRequest {
+    /// Exact folder name.
+    pub folder: String,
+    #[serde(flatten)]
+    pub body: BodyOptions,
+}
+
+#[derive(Clone, Deserialize, JsonSchema)]
+pub(crate) struct AccountNotesRequest {
+    /// Account name, e.g. "iCloud" or "On My Mac".
     pub account: String,
+    #[serde(flatten)]
+    pub body: BodyOptions,
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct SearchRequest {
     /// Case-insensitive substring to look for.
     pub query: String,
-    /// Also search note bodies, not just titles. Defaults to `true`.
+    /// Search bodies as well as titles. Defaults to true.
     pub in_body: Option<bool>,
-    /// Maximum number of notes to return. Defaults to 50.
-    pub limit: Option<usize>,
+    #[serde(flatten)]
+    pub body: BodyOptions,
 }
 
 impl SearchRequest {
     pub fn in_body(&self) -> bool {
         self.in_body.unwrap_or(true)
     }
-
-    pub fn limit(&self) -> usize {
-        self.limit.unwrap_or(DEFAULT_SEARCH_LIMIT)
-    }
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct CreateNoteRequest {
-    /// Title of the new note.
+    /// Title for the new note.
     pub title: String,
-    /// HTML body of the new note.
+    /// HTML body.
     pub content: String,
-    /// Folder to create the note in. Defaults to the Notes default folder.
+    /// Destination folder. Defaults to the Notes default folder.
     pub folder: Option<String>,
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct UpdateNoteRequest {
-    /// Current title of the note to update.
+    /// Current exact title.
     pub title: String,
-    /// New title (omit to keep unchanged).
+    /// New title. Omit to keep.
     pub new_title: Option<String>,
-    /// New HTML body (omit to keep unchanged).
+    /// New HTML body, replacing the old one. Omit to keep.
     pub new_content: Option<String>,
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct AppendNoteRequest {
-    /// Title of the note to append to.
+    /// Exact title of the note.
     pub title: String,
-    /// HTML appended to the end of the existing body.
+    /// HTML to add at the end.
     pub content: String,
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct MoveNoteRequest {
-    /// Title of the note to move.
+    /// Exact title of the note.
     pub title: String,
-    /// Name of the destination folder.
+    /// Destination folder name.
     pub folder: String,
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct CreateFolderRequest {
-    /// Name of the new folder.
+    /// Name for the new folder.
     pub name: String,
-    /// Account to create the folder in. Defaults to the first account.
+    /// Account to create it in. Defaults to the first.
     pub account: Option<String>,
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct FolderNameRequest {
-    /// Name of the folder.
+    /// Exact folder name.
     pub name: String,
 }
 
@@ -105,12 +158,43 @@ pub(crate) struct NoteTitlesResponse {
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub(crate) struct NotesResponse {
     pub notes: Vec<NoteInfo>,
+    /// Present when `limit` cut the result short. Raise `limit`, or narrow the
+    /// query, to see the rest.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+}
+
+impl NotesResponse {
+    pub fn new(page: NotePage, format: BodyFormat) -> Self {
+        let mut notes = page.notes;
+        if format == BodyFormat::Text {
+            for note in &mut notes {
+                note.body = crate::notes::to_plain_text(&note.body);
+            }
+        }
+        Self {
+            notes,
+            truncated: page.truncated,
+        }
+    }
 }
 
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub(crate) struct NoteResponse {
-    /// `null` when no note with the requested title was found.
+    /// Null when no note has that title.
     pub note: Option<NoteInfo>,
+}
+
+impl NoteResponse {
+    pub fn new(note: Option<NoteInfo>, format: BodyFormat) -> Self {
+        let note = note.map(|mut note| {
+            if format == BodyFormat::Text {
+                note.body = crate::notes::to_plain_text(&note.body);
+            }
+            note
+        });
+        Self { note }
+    }
 }
 
 #[derive(Debug, Default, Serialize, JsonSchema)]
@@ -131,11 +215,11 @@ pub(crate) struct AttachmentsResponse {
 /// Outcome of a note write or delete.
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub(crate) struct WriteResponse {
-    /// `true` if the note was found and the operation applied.
+    /// True when the operation applied.
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<PartialNoteInfo>,
-    /// Why the operation failed. Absent on success.
+    /// Why it failed. Absent on success.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -172,7 +256,7 @@ pub(crate) struct FolderWriteResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder: Option<FolderInfo>,
-    /// Why the operation failed. Absent on success.
+    /// Why it failed. Absent on success.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -190,21 +274,23 @@ mod tests {
     fn search_defaults_to_body_search_and_the_standard_limit() {
         let request: SearchRequest = parse(json!({ "query": "budget" }));
         assert!(request.in_body());
-        assert_eq!(request.limit(), DEFAULT_SEARCH_LIMIT);
+        assert_eq!(request.body.limit(), DEFAULT_NOTE_LIMIT);
+        assert_eq!(request.body.format(), BodyFormat::Text);
     }
 
     #[test]
     fn search_honours_explicit_options() {
         let request: SearchRequest =
-            parse(json!({ "query": "budget", "in_body": false, "limit": 5 }));
+            parse(json!({ "query": "budget", "in_body": false, "limit": 5, "format": "html" }));
         assert!(!request.in_body());
-        assert_eq!(request.limit(), 5);
+        assert_eq!(request.body.limit(), 5);
+        assert_eq!(request.body.format(), BodyFormat::Html);
     }
 
     #[test]
     fn search_accepts_a_zero_limit() {
         let request: SearchRequest = parse(json!({ "query": "x", "limit": 0 }));
-        assert_eq!(request.limit(), 0);
+        assert_eq!(request.body.limit(), 0);
     }
 
     #[test]
@@ -288,5 +374,100 @@ mod tests {
             to_value(NoteResponse::default()).unwrap(),
             json!({ "note": null })
         );
+    }
+
+    /// A note body as Notes stores it: one `<div>` per line, inline styles,
+    /// entity-escaped punctuation.
+    const REALISTIC_BODY: &str = concat!(
+        r#"<div><h1>Q3 planning</h1></div><div><br></div>"#,
+        r#"<div><span style="font-family: Helvetica; font-size: 14px">"#,
+        r#"Owner &amp; reviewer: Sam</span></div><div><br></div>"#,
+        r#"<div><ul class="Apple-dash-list"><li>Draft the brief</li>"#,
+        r#"<li>Book the review</li><li>Send it round</li></ul></div>"#,
+    );
+
+    #[test]
+    fn text_bodies_are_a_fraction_of_the_html() {
+        let page = NotePage {
+            notes: vec![note_with_body(REALISTIC_BODY)],
+            truncated: false,
+        };
+        let as_html = to_value(NotesResponse::new(
+            NotePage {
+                notes: vec![note_with_body(REALISTIC_BODY)],
+                truncated: false,
+            },
+            BodyFormat::Html,
+        ))
+        .unwrap()
+        .to_string();
+        let as_text = to_value(NotesResponse::new(page, BodyFormat::Text))
+            .unwrap()
+            .to_string();
+
+        let body_html = REALISTIC_BODY.len();
+        let body_text = crate::notes::to_plain_text(REALISTIC_BODY).len();
+        assert!(
+            body_text * 2 < body_html,
+            "expected the body to more than halve: {body_text} vs {body_html}"
+        );
+        assert!(
+            as_text.len() * 10 < as_html.len() * 7,
+            "expected the whole payload to shrink by ~30%: {} vs {}",
+            as_text.len(),
+            as_html.len()
+        );
+        assert!(as_text.contains("Owner & reviewer: Sam"));
+        assert!(!as_text.contains("<div>"));
+    }
+
+    #[test]
+    fn html_format_leaves_the_body_untouched() {
+        let page = NotePage {
+            notes: vec![note_with_body(REALISTIC_BODY)],
+            truncated: false,
+        };
+        let response = NotesResponse::new(page, BodyFormat::Html);
+        assert_eq!(response.notes[0].body, REALISTIC_BODY);
+    }
+
+    #[test]
+    fn a_full_page_reports_that_it_was_truncated() {
+        let page = NotePage {
+            notes: vec![note_with_body("a"), note_with_body("b")],
+            truncated: true,
+        };
+        let value = to_value(NotesResponse::new(page, BodyFormat::Text)).unwrap();
+        assert_eq!(value["truncated"], json!(true));
+    }
+
+    #[test]
+    fn an_untruncated_page_omits_the_flag() {
+        let value = to_value(NotesResponse::default()).unwrap();
+        assert!(
+            value.get("truncated").is_none(),
+            "a false flag should not be sent: {value}"
+        );
+    }
+
+    #[test]
+    fn unset_flags_are_left_out_of_a_note() {
+        let value = to_value(note_with_body("x")).unwrap();
+        assert!(value.get("shared").is_none(), "false bools cost tokens");
+        assert!(value.get("password_protected").is_none());
+    }
+
+    fn note_with_body(body: &str) -> NoteInfo {
+        NoteInfo {
+            id: "x-coredata://1".into(),
+            title: "Q3 planning".into(),
+            body: body.into(),
+            creation_date: "2024-01-15 09:30:00 +0000".into(),
+            modification_date: "2024-01-15 09:30:00 +0000".into(),
+            folder: "Work".into(),
+            account: "iCloud".into(),
+            shared: false,
+            password_protected: false,
+        }
     }
 }

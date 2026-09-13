@@ -1,7 +1,8 @@
 use super::AppleNotesMCP;
 use super::models::{
-    AccountRequest, AccountsResponse, AttachmentsResponse, EmptyRequest, FolderRequest,
-    FoldersResponse, NoteResponse, NoteTitlesResponse, NotesResponse, SearchRequest, TitleRequest,
+    AccountNotesRequest, AccountsResponse, AttachmentsResponse, BulkNotesRequest, EmptyRequest,
+    FolderNotesRequest, FolderRequest, FoldersResponse, GetNoteRequest, NoteResponse,
+    NoteTitlesResponse, NotesResponse, SearchRequest, TitleRequest,
 };
 use anyhow::Result;
 use rmcp::handler::server::wrapper::Parameters;
@@ -22,11 +23,20 @@ fn or_empty<T: Default>(tool: &'static str, result: Result<T>) -> T {
     }
 }
 
+fn notes_ok(tool: &'static str, response: NotesResponse) -> Result<Json<NotesResponse>, String> {
+    info!(
+        tool,
+        count = response.notes.len(),
+        truncated = response.truncated,
+        "ok"
+    );
+    Ok(Json(response))
+}
+
 impl AppleNotesMCP {
     #[tool(
-        description = "Return the titles of every note. Fast: skips body content. \
-                       Use this to discover what notes exist or to find a title before \
-                       calling get_note."
+        description = "Titles of every note, no bodies. The cheapest way to see what \
+                       exists; follow up with get_note."
     )]
     pub fn list_notes(
         &self,
@@ -38,87 +48,78 @@ impl AppleNotesMCP {
     }
 
     #[tool(
-        description = "Return full metadata and HTML body for every note across all accounts. \
-                       Slow on large libraries — prefer search_notes to find content and \
-                       get_note for a single note."
+        description = "One note by exact title, with its body. Returns null if nothing \
+                       matches — search_notes first when unsure of the title."
     )]
-    pub fn get_all_notes(
-        &self,
-        _p: Parameters<EmptyRequest>,
-    ) -> Result<Json<NotesResponse>, String> {
-        let notes = or_empty("get_all_notes", self.app.get_all_notes());
-        info!(tool = "get_all_notes", count = notes.len(), "ok");
-        Ok(Json(NotesResponse { notes }))
-    }
-
-    #[tool(
-        description = "Return full metadata and HTML body for one note by exact title. \
-                       Returns null when no note matches. Use search_notes or list_notes \
-                       first if the exact title is unknown."
-    )]
-    pub fn get_note(&self, p: Parameters<TitleRequest>) -> Result<Json<NoteResponse>, String> {
+    pub fn get_note(&self, p: Parameters<GetNoteRequest>) -> Result<Json<NoteResponse>, String> {
         let note = or_empty("get_note", self.app.get_note_by_title(&p.0.title));
         info!(tool = "get_note", found = note.is_some(), "ok");
-        Ok(Json(NoteResponse { note }))
+        Ok(Json(NoteResponse::new(
+            note,
+            p.0.format.unwrap_or_default(),
+        )))
     }
 
     #[tool(
-        description = "Find notes whose title — and by default body — contains the query, \
-                       compared case-insensitively. Returns at most `limit` notes \
-                       (default 50). Prefer this over get_all_notes for content lookups."
+        description = "Notes whose title, or body unless in_body is false, contains the \
+                       query. Case-insensitive. The right way to find notes by content."
     )]
     pub fn search_notes(
         &self,
         p: Parameters<SearchRequest>,
     ) -> Result<Json<NotesResponse>, String> {
-        let notes = or_empty(
+        let page = or_empty(
             "search_notes",
             self.app
-                .search_notes(&p.0.query, p.0.in_body(), p.0.limit()),
+                .search_notes(&p.0.query, p.0.in_body(), p.0.body.limit()),
         );
-        info!(tool = "search_notes", count = notes.len(), "ok");
-        Ok(Json(NotesResponse { notes }))
+        notes_ok("search_notes", NotesResponse::new(page, p.0.body.format()))
     }
 
     #[tool(
-        description = "Return full metadata and HTML body for all notes in a folder, \
-                       matched by exact folder name. Use list_folders first if the \
-                       folder name is unknown."
+        description = "Every note with its body, newest account first. Expensive — use \
+                       search_notes to find content and get_note for one known title."
     )]
+    pub fn get_all_notes(
+        &self,
+        p: Parameters<BulkNotesRequest>,
+    ) -> Result<Json<NotesResponse>, String> {
+        let page = or_empty("get_all_notes", self.app.get_all_notes(p.0.body.limit()));
+        notes_ok("get_all_notes", NotesResponse::new(page, p.0.body.format()))
+    }
+
+    #[tool(description = "Notes in one folder, by exact folder name. See list_folders.")]
     pub fn get_notes_in_folder(
         &self,
-        p: Parameters<FolderRequest>,
+        p: Parameters<FolderNotesRequest>,
     ) -> Result<Json<NotesResponse>, String> {
-        let notes = or_empty(
+        let page = or_empty(
             "get_notes_in_folder",
-            self.app.get_notes_in_folder(&p.0.folder),
+            self.app.get_notes_in_folder(&p.0.folder, p.0.body.limit()),
         );
-        info!(tool = "get_notes_in_folder", count = notes.len(), "ok");
-        Ok(Json(NotesResponse { notes }))
+        notes_ok(
+            "get_notes_in_folder",
+            NotesResponse::new(page, p.0.body.format()),
+        )
     }
 
-    #[tool(
-        description = "Return full metadata and HTML body for all notes in an account, \
-                       matched by exact account name. Use list_accounts first if the \
-                       account name is unknown."
-    )]
+    #[tool(description = "Notes in one account, by exact account name. See list_accounts.")]
     pub fn get_notes_in_account(
         &self,
-        p: Parameters<AccountRequest>,
+        p: Parameters<AccountNotesRequest>,
     ) -> Result<Json<NotesResponse>, String> {
-        let notes = or_empty(
+        let page = or_empty(
             "get_notes_in_account",
-            self.app.get_notes_in_account(&p.0.account),
+            self.app
+                .get_notes_in_account(&p.0.account, p.0.body.limit()),
         );
-        info!(tool = "get_notes_in_account", count = notes.len(), "ok");
-        Ok(Json(NotesResponse { notes }))
+        notes_ok(
+            "get_notes_in_account",
+            NotesResponse::new(page, p.0.body.format()),
+        )
     }
 
-    #[tool(
-        description = "Return the files attached to a note, matched by exact title. \
-                       Returns an empty list when the note has no attachments or does \
-                       not exist."
-    )]
+    #[tool(description = "Files attached to a note, by exact title. Empty if it has none.")]
     pub fn get_attachments(
         &self,
         p: Parameters<TitleRequest>,
@@ -129,9 +130,8 @@ impl AppleNotesMCP {
     }
 
     #[tool(
-        description = "Return all folders and subfolders across every account, each with \
-                       its account and parent name. Call this to discover folder names \
-                       before using get_notes_in_folder or get_subfolders."
+        description = "Every folder and subfolder, with its account and parent. Call \
+                       before any tool that takes a folder name."
     )]
     pub fn list_folders(
         &self,
@@ -142,11 +142,7 @@ impl AppleNotesMCP {
         Ok(Json(FoldersResponse { folders }))
     }
 
-    #[tool(
-        description = "Return all direct and nested subfolders of a folder, matched by \
-                       exact folder name. Returns empty when the folder has no children \
-                       or does not exist."
-    )]
+    #[tool(description = "Subfolders of one folder, nested ones included. Empty if none.")]
     pub fn get_subfolders(
         &self,
         p: Parameters<FolderRequest>,
@@ -156,11 +152,7 @@ impl AppleNotesMCP {
         Ok(Json(FoldersResponse { folders }))
     }
 
-    #[tool(
-        description = "Return all accounts configured in Apple Notes (iCloud, On My Mac, \
-                       Exchange, …). Call this to discover account names before using \
-                       get_notes_in_account."
-    )]
+    #[tool(description = "Configured accounts: iCloud, On My Mac, Exchange, and so on.")]
     pub fn list_accounts(
         &self,
         _p: Parameters<EmptyRequest>,
