@@ -38,6 +38,8 @@ impl AppleNotesMCP {
                     Self::get_notes_in_account_tool_attr(),
                     Self::get_notes_in_account,
                 ))
+                .with_route((Self::search_notes_tool_attr(), Self::search_notes))
+                .with_route((Self::get_attachments_tool_attr(), Self::get_attachments))
                 .with_route((Self::list_folders_tool_attr(), Self::list_folders))
                 .with_route((Self::get_subfolders_tool_attr(), Self::get_subfolders))
                 .with_route((Self::list_accounts_tool_attr(), Self::list_accounts))
@@ -46,9 +48,14 @@ impl AppleNotesMCP {
             router = router
                 .with_route((Self::create_note_tool_attr(), Self::create_note))
                 .with_route((Self::update_note_tool_attr(), Self::update_note))
+                .with_route((Self::append_to_note_tool_attr(), Self::append_to_note))
+                .with_route((Self::move_note_tool_attr(), Self::move_note))
+                .with_route((Self::create_folder_tool_attr(), Self::create_folder))
         }
         if scopes.contains(ScopeSet::DELETE) {
-            router = router.with_route((Self::delete_note_tool_attr(), Self::delete_note))
+            router = router
+                .with_route((Self::delete_note_tool_attr(), Self::delete_note))
+                .with_route((Self::delete_folder_tool_attr(), Self::delete_folder))
         }
 
         router
@@ -85,12 +92,24 @@ mod tests {
     #[test]
     fn write_scope_does_not_leak_read_or_delete_tools() {
         let names = tool_names(ScopeSet::WRITE);
-        assert_eq!(names, vec!["create_note", "update_note"]);
+        assert_eq!(
+            names,
+            vec![
+                "append_to_note",
+                "create_folder",
+                "create_note",
+                "move_note",
+                "update_note",
+            ]
+        );
     }
 
     #[test]
     fn delete_scope_registers_only_delete_tools() {
-        assert_eq!(tool_names(ScopeSet::DELETE), vec!["delete_note"]);
+        assert_eq!(
+            tool_names(ScopeSet::DELETE),
+            vec!["delete_folder", "delete_note"]
+        );
     }
 
     #[test]
@@ -100,7 +119,18 @@ mod tests {
             Scope::Write,
             Scope::Delete,
         ]));
-        for tool in ["list_notes", "create_note", "update_note", "delete_note"] {
+        assert_eq!(names.len(), 17);
+        for tool in [
+            "list_notes",
+            "search_notes",
+            "get_attachments",
+            "create_note",
+            "append_to_note",
+            "move_note",
+            "create_folder",
+            "delete_note",
+            "delete_folder",
+        ] {
             assert!(names.contains(&tool.to_string()), "missing {tool}");
         }
     }

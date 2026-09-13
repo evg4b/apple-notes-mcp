@@ -158,7 +158,7 @@ fn debug_create_and_delete() {
     // clean up leftovers from a previous aborted run
     let _ = app.delete_note(DEBUG_NOTE_TITLE);
 
-    app.create_note(DEBUG_NOTE_TITLE, "<div>debug body</div>")
+    app.create_note(DEBUG_NOTE_TITLE, "<div>debug body</div>", None)
         .unwrap();
     println!("created {:?}", DEBUG_NOTE_TITLE);
 
@@ -179,7 +179,7 @@ fn debug_create_update_delete() {
     let _ = app.delete_note(DEBUG_NOTE_TITLE);
     let _ = app.delete_note("__debug_test_note_renamed__");
 
-    app.create_note(DEBUG_NOTE_TITLE, "<div>original</div>")
+    app.create_note(DEBUG_NOTE_TITLE, "<div>original</div>", None)
         .unwrap();
 
     let ok = app
