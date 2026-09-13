@@ -1,113 +1,156 @@
-use objc2::__framework_prelude::{AnyObject, Retained};
 use objc2::msg_send;
-use objc2::runtime::Sel;
+use objc2::rc::Retained;
+use objc2::runtime::{AnyObject, Sel};
 use objc2_foundation::{NSArray, NSString};
 
-/// Read a scripting property as a plain `String` via KVC + `description`.
-/// Works for NSString (returns the string itself) and NSDate (returns its description).
-pub(super) unsafe fn kvc_string(obj: &AnyObject, key: &str) -> String {
+/// Scripting-dictionary keys.
+///
+/// `ns_string!` caches the `NSString` after first use, so repeated property
+/// access does not allocate a fresh key object per Apple Event.
+pub(super) mod keys {
+    use objc2_foundation::{NSString, ns_string};
+
+    macro_rules! key {
+        ($fn_name:ident, $key:literal) => {
+            #[inline]
+            pub(crate) fn $fn_name() -> &'static NSString {
+                ns_string!($key)
+            }
+        };
+    }
+
+    key!(id, "id");
+    key!(name, "name");
+    key!(body, "body");
+    key!(creation_date, "creationDate");
+    key!(modification_date, "modificationDate");
+    key!(shared, "shared");
+    key!(password_protected, "passwordProtected");
+}
+
+/// Read a scripting property via KVC (`valueForKey:`).
+///
+/// `SBObject` implements `valueForKey:` by sending an Apple Event, so this
+/// reaches any property in the Notes scripting dictionary without the selector
+/// needing to exist in the static method table.
+pub(super) unsafe fn kvc_get(obj: &AnyObject, key: &NSString) -> Option<Retained<AnyObject>> {
+    unsafe { msg_send![obj, valueForKey: key] }
+}
+
+/// Read a scripting property as a `String`. Non-string values (e.g. `NSDate`)
+/// fall back to their `description`.
+pub(super) unsafe fn kvc_string(obj: &AnyObject, key: &NSString) -> String {
     match unsafe { kvc_get(obj, key) } {
         None => String::new(),
-        Some(val) => {
-            let desc: Retained<NSString> = unsafe { msg_send![&*val, description] };
-            desc.to_string()
-        }
+        Some(val) => unsafe { any_to_string(&val) },
     }
 }
 
-/// Read a boolean scripting property via KVC.
-/// ScriptingBridge returns boolean values as NSNumber; `charValue` is a real
-/// NSNumber method, so the debug assertion passes.
-pub(super) unsafe fn kvc_bool(obj: &AnyObject, key: &str) -> bool {
+/// Read a boolean scripting property. ScriptingBridge returns booleans as
+/// `NSNumber`, whose `charValue` is non-zero for true.
+pub(super) unsafe fn kvc_bool(obj: &AnyObject, key: &NSString) -> bool {
     match unsafe { kvc_get(obj, key) } {
         None => false,
-        Some(val) => {
-            let n: i8 = unsafe { msg_send![&*val, charValue] };
-            n != 0
-        }
+        Some(val) => unsafe { any_to_bool(&val) },
     }
-}
-
-/// Get a scripting-dictionary property via KVC (`valueForKey:`).
-///
-/// `SBObject` implements `valueForKey:` to send Apple Events, so this works for
-/// any property in the Notes scripting dictionary without the selector needing to
-/// appear in the static method table.
-pub(super) unsafe fn kvc_get(obj: &AnyObject, key: &str) -> Option<Retained<AnyObject>> {
-    let key_ns = NSString::from_str(key);
-    unsafe { msg_send![obj, valueForKey: &*key_ns] }
 }
 
 /// Set a string scripting property via KVC (`setValue:forKey:`).
-pub(super) unsafe fn kvc_set(obj: &AnyObject, key: &str, value: &str) {
-    let key_ns = NSString::from_str(key);
-    let val_ns = NSString::from_str(value);
-    let _: () = unsafe { msg_send![obj, setValue: &*val_ns, forKey: &*key_ns] };
+pub(super) unsafe fn kvc_set(obj: &AnyObject, key: &NSString, value: &str) {
+    let val = NSString::from_str(value);
+    let _: () = unsafe { msg_send![obj, setValue: &*val, forKey: key] };
 }
 
-/// Return the number of elements in a ScriptingBridge element array.
+/// Number of elements in a ScriptingBridge element array.
 pub(super) unsafe fn sb_count(arr: &AnyObject) -> usize {
     unsafe { msg_send![arr, count] }
 }
 
-/// Return the element at `index` in a ScriptingBridge element array.
+/// Element at `index` in a ScriptingBridge element array.
 pub(super) unsafe fn sb_at(arr: &AnyObject, index: usize) -> Retained<AnyObject> {
     unsafe { msg_send![arr, objectAtIndex: index] }
 }
 
-/// Batch-fetch a string property from every element in an SBElementArray.
+/// Batch-fetch a string property from every element of an element array.
 ///
-/// Calls `valueForKey:` on the *collection* (not individual elements), which
-/// ScriptingBridge translates into a single "get all elements' <key>" Apple
-/// Event. The result is a plain `NSArray` — iteration is then local with no
-/// further Apple Events. Cost: O(1) Apple Events instead of O(2N).
-pub(super) unsafe fn kvc_string_vec(collection: &AnyObject, key: &str) -> Vec<String> {
-    let Some(raw) = (unsafe { kvc_get(collection, key) }) else {
-        return Vec::new();
-    };
-    // valueForKey: on an SBElementArray returns a plain NSArray.
-    // Downcast so we can use the safe NSArray::iter() from objc2-foundation
-    // instead of manual index arithmetic with msg_send!.
-    let Some(arr) = raw.downcast_ref::<NSArray<AnyObject>>() else {
-        return Vec::new();
-    };
-    arr.iter()
-        .map(|elem| {
-            // iter() yields Retained<AnyObject>; &*elem coerces to &AnyObject for msg_send!
-            let desc: Retained<NSString> = unsafe { msg_send![&*elem, description] };
-            desc.to_string()
-        })
-        .collect()
+/// `valueForKey:` on the *collection* (rather than on each element) is
+/// translated by ScriptingBridge into a single "get every element's `key`"
+/// Apple Event returning a plain `NSArray`. Cost: 1 Apple Event instead of N.
+pub(super) unsafe fn kvc_string_vec(collection: &AnyObject, key: &NSString) -> Vec<String> {
+    unsafe { kvc_vec(collection, key, |elem| any_to_string(elem)) }
 }
 
-/// Batch-fetch a boolean property from every element in an SBElementArray.
+/// Batch-fetch a boolean property from every element of an element array.
+pub(super) unsafe fn kvc_bool_vec(collection: &AnyObject, key: &NSString) -> Vec<bool> {
+    unsafe { kvc_vec(collection, key, |elem| any_to_bool(elem)) }
+}
+
+/// Index of the first element whose `key` equals `value`.
 ///
-/// Same single-Apple-Event strategy as `kvc_string_vec`.
-pub(super) unsafe fn kvc_bool_vec(collection: &AnyObject, key: &str) -> Vec<bool> {
+/// Comparison happens on the `NSString`s returned by the batch fetch, so
+/// looking a note up by title costs one Apple Event and no Rust allocations.
+pub(super) unsafe fn kvc_index_of(
+    collection: &AnyObject,
+    key: &NSString,
+    value: &NSString,
+) -> Option<usize> {
+    let raw = unsafe { kvc_get(collection, key) }?;
+    let arr = raw.downcast_ref::<NSArray<AnyObject>>()?;
+    arr.iter().position(|elem| {
+        elem.downcast_ref::<NSString>()
+            .is_some_and(|s| s.isEqualToString(value))
+    })
+}
+
+unsafe fn kvc_vec<T>(
+    collection: &AnyObject,
+    key: &NSString,
+    convert: impl Fn(&AnyObject) -> T,
+) -> Vec<T> {
     let Some(raw) = (unsafe { kvc_get(collection, key) }) else {
         return Vec::new();
     };
     let Some(arr) = raw.downcast_ref::<NSArray<AnyObject>>() else {
         return Vec::new();
     };
-    arr.iter()
-        .map(|elem| {
-            let n: i8 = unsafe { msg_send![&*elem, charValue] };
-            n != 0
-        })
-        .collect()
+    arr.iter().map(|elem| convert(&elem)).collect()
+}
+
+/// Convert a KVC result to a `String`, skipping the `description` round-trip
+/// when the value already is an `NSString`.
+unsafe fn any_to_string(val: &AnyObject) -> String {
+    match val.downcast_ref::<NSString>() {
+        Some(s) => s.to_string(),
+        None => {
+            let desc: Retained<NSString> = unsafe { msg_send![val, description] };
+            desc.to_string()
+        }
+    }
+}
+
+unsafe fn any_to_bool(val: &AnyObject) -> bool {
+    let n: i8 = unsafe { msg_send![val, charValue] };
+    n != 0
 }
 
 /// Retrieve a ScriptingBridge element collection via `performSelector:`.
 ///
 /// ScriptingBridge routes collection selectors (`notes`, `folders`, `accounts`,
-/// `attachments`) through `doesNotUnderstand:`, so they are absent from the static
-/// method table. objc2's debug assertions call `responds_to_selector:` before every
-/// `msg_send!`, which returns NO for those selectors. Routing through
-/// `performSelector:` (a real NSObject method) bypasses that check and lets the
-/// ObjC runtime dispatch dynamically.
+/// `attachments`) through `doesNotUnderstand:`, so they are absent from the
+/// static method table and objc2's debug `responds_to_selector:` assertion
+/// rejects them. `performSelector:` is a real `NSObject` method, so it passes
+/// the check and lets the runtime dispatch dynamically.
 pub(super) unsafe fn sb_collection(obj: &AnyObject, sel: Sel) -> Retained<AnyObject> {
     unsafe { msg_send![obj, performSelector: sel] }
+}
+
+/// Move the `index`-th string out of `values`, leaving an empty string behind.
+/// Used to build owned structs from batch-fetched columns without cloning.
+pub(super) fn take_at(values: &mut [String], index: usize) -> String {
+    values
+        .get_mut(index)
+        .map(std::mem::take)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -115,6 +158,7 @@ mod tests {
     use super::*;
     use objc2::class;
     use objc2_foundation::NSNumber;
+    use objc2_foundation::ns_string;
 
     unsafe fn new_dict() -> Retained<AnyObject> {
         let alloc: *mut AnyObject = msg_send![class!(NSMutableDictionary), alloc];
@@ -122,19 +166,23 @@ mod tests {
         unsafe { Retained::from_raw(init).unwrap() }
     }
 
+    unsafe fn dict_set(obj: &AnyObject, key: &NSString, val: &AnyObject) {
+        let _: () = msg_send![obj, setValue: val, forKey: key];
+    }
+
     unsafe fn dict_set_str(obj: &AnyObject, key: &str, val: &str) {
         let k = NSString::from_str(key);
         let v = NSString::from_str(val);
-        let _: () = msg_send![obj, setValue: &*v, forKey: &*k];
+        unsafe { dict_set(obj, &k, &v) };
     }
 
     unsafe fn dict_set_bool(obj: &AnyObject, key: &str, val: bool) {
         let k = NSString::from_str(key);
         let n: Retained<NSNumber> = msg_send![class!(NSNumber), numberWithBool: val];
-        let _: () = msg_send![obj, setValue: &*n, forKey: &*k];
+        unsafe { dict_set(obj, &k, &n) };
     }
 
-    unsafe fn make_nsarray(items: &[&str]) -> Retained<AnyObject> {
+    unsafe fn nsarray(items: &[&str]) -> Retained<AnyObject> {
         if items.is_empty() {
             return msg_send![class!(NSArray), array];
         }
@@ -147,11 +195,35 @@ mod tests {
         msg_send![class!(NSArray), arrayWithObjects: ptrs.as_ptr(), count: ptrs.len()]
     }
 
+    unsafe fn nsarray_bools(items: &[bool]) -> Retained<AnyObject> {
+        let numbers: Vec<Retained<NSNumber>> = items
+            .iter()
+            .map(|&b| msg_send![class!(NSNumber), numberWithBool: b])
+            .collect();
+        let ptrs: Vec<*const AnyObject> = numbers
+            .iter()
+            .map(|n| n.as_ref() as *const NSNumber as *const AnyObject)
+            .collect();
+        if ptrs.is_empty() {
+            return msg_send![class!(NSArray), array];
+        }
+        msg_send![class!(NSArray), arrayWithObjects: ptrs.as_ptr(), count: ptrs.len()]
+    }
+
+    /// A dictionary whose value for `key` is an array — the shape
+    /// `valueForKey:` on an SBElementArray returns.
+    unsafe fn dict_with_column(key: &str, values: Retained<AnyObject>) -> Retained<AnyObject> {
+        let dict = unsafe { new_dict() };
+        let k = NSString::from_str(key);
+        unsafe { dict_set(&dict, &k, &values) };
+        dict
+    }
+
     #[test]
     fn kvc_get_returns_none_for_missing_key() {
         unsafe {
             let dict = new_dict();
-            assert!(kvc_get(&dict, "missing").is_none());
+            assert!(kvc_get(&dict, ns_string!("missing")).is_none());
         }
     }
 
@@ -159,7 +231,7 @@ mod tests {
     fn kvc_string_returns_empty_for_missing_key() {
         unsafe {
             let dict = new_dict();
-            assert_eq!(kvc_string(&dict, "missing"), "");
+            assert_eq!(kvc_string(&dict, ns_string!("missing")), "");
         }
     }
 
@@ -168,7 +240,27 @@ mod tests {
         unsafe {
             let dict = new_dict();
             dict_set_str(&dict, "name", "Alice");
-            assert_eq!(kvc_string(&dict, "name"), "Alice");
+            assert_eq!(kvc_string(&dict, keys::name()), "Alice");
+        }
+    }
+
+    #[test]
+    fn kvc_string_preserves_unicode() {
+        unsafe {
+            let dict = new_dict();
+            dict_set_str(&dict, "name", "Заметка 📝");
+            assert_eq!(kvc_string(&dict, keys::name()), "Заметка 📝");
+        }
+    }
+
+    #[test]
+    fn kvc_string_falls_back_to_description_for_non_strings() {
+        unsafe {
+            let dict = new_dict();
+            let k = NSString::from_str("count");
+            let n: Retained<NSNumber> = msg_send![class!(NSNumber), numberWithInt: 42i32];
+            dict_set(&dict, &k, &n);
+            assert_eq!(kvc_string(&dict, ns_string!("count")), "42");
         }
     }
 
@@ -176,7 +268,7 @@ mod tests {
     fn kvc_bool_returns_false_for_missing_key() {
         unsafe {
             let dict = new_dict();
-            assert!(!kvc_bool(&dict, "flag"));
+            assert!(!kvc_bool(&dict, ns_string!("flag")));
         }
     }
 
@@ -184,8 +276,8 @@ mod tests {
     fn kvc_bool_returns_true() {
         unsafe {
             let dict = new_dict();
-            dict_set_bool(&dict, "active", true);
-            assert!(kvc_bool(&dict, "active"));
+            dict_set_bool(&dict, "shared", true);
+            assert!(kvc_bool(&dict, keys::shared()));
         }
     }
 
@@ -193,8 +285,8 @@ mod tests {
     fn kvc_bool_returns_false() {
         unsafe {
             let dict = new_dict();
-            dict_set_bool(&dict, "active", false);
-            assert!(!kvc_bool(&dict, "active"));
+            dict_set_bool(&dict, "shared", false);
+            assert!(!kvc_bool(&dict, keys::shared()));
         }
     }
 
@@ -202,8 +294,8 @@ mod tests {
     fn kvc_set_stores_value() {
         unsafe {
             let dict = new_dict();
-            kvc_set(&dict, "body", "content");
-            assert_eq!(kvc_string(&dict, "body"), "content");
+            kvc_set(&dict, keys::body(), "content");
+            assert_eq!(kvc_string(&dict, keys::body()), "content");
         }
     }
 
@@ -211,35 +303,123 @@ mod tests {
     fn kvc_set_overwrites_existing_value() {
         unsafe {
             let dict = new_dict();
-            kvc_set(&dict, "title", "Old");
-            kvc_set(&dict, "title", "New");
-            assert_eq!(kvc_string(&dict, "title"), "New");
+            kvc_set(&dict, keys::name(), "Old");
+            kvc_set(&dict, keys::name(), "New");
+            assert_eq!(kvc_string(&dict, keys::name()), "New");
         }
     }
 
     #[test]
     fn sb_count_empty_array() {
         unsafe {
-            let arr = make_nsarray(&[]);
-            assert_eq!(sb_count(&arr), 0);
+            assert_eq!(sb_count(&nsarray(&[])), 0);
         }
     }
 
     #[test]
     fn sb_count_returns_length() {
         unsafe {
-            let arr = make_nsarray(&["a", "b", "c"]);
-            assert_eq!(sb_count(&arr), 3);
+            assert_eq!(sb_count(&nsarray(&["a", "b", "c"])), 3);
         }
     }
 
     #[test]
     fn sb_at_returns_element_at_index() {
         unsafe {
-            let arr = make_nsarray(&["first", "second"]);
-            let elem = sb_at(&arr, 0);
-            let desc: Retained<NSString> = msg_send![&*elem, description];
-            assert_eq!(desc.to_string(), "first");
+            let arr = nsarray(&["first", "second"]);
+            let desc: Retained<NSString> = msg_send![&*sb_at(&arr, 1), description];
+            assert_eq!(desc.to_string(), "second");
         }
+    }
+
+    #[test]
+    fn kvc_string_vec_returns_every_element() {
+        unsafe {
+            let dict = dict_with_column("name", nsarray(&["a", "b", "c"]));
+            assert_eq!(kvc_string_vec(&dict, keys::name()), vec!["a", "b", "c"]);
+        }
+    }
+
+    #[test]
+    fn kvc_string_vec_is_empty_for_missing_key() {
+        unsafe {
+            let dict = new_dict();
+            assert!(kvc_string_vec(&dict, keys::name()).is_empty());
+        }
+    }
+
+    #[test]
+    fn kvc_string_vec_is_empty_for_non_array_value() {
+        unsafe {
+            let dict = new_dict();
+            dict_set_str(&dict, "name", "not an array");
+            assert!(kvc_string_vec(&dict, keys::name()).is_empty());
+        }
+    }
+
+    #[test]
+    fn kvc_bool_vec_returns_every_element() {
+        unsafe {
+            let dict = dict_with_column("shared", nsarray_bools(&[true, false, true]));
+            assert_eq!(kvc_bool_vec(&dict, keys::shared()), vec![true, false, true]);
+        }
+    }
+
+    #[test]
+    fn kvc_index_of_finds_matching_element() {
+        unsafe {
+            let dict = dict_with_column("name", nsarray(&["one", "two", "three"]));
+            let target = NSString::from_str("two");
+            assert_eq!(kvc_index_of(&dict, keys::name(), &target), Some(1));
+        }
+    }
+
+    #[test]
+    fn kvc_index_of_returns_first_match() {
+        unsafe {
+            let dict = dict_with_column("name", nsarray(&["dup", "dup"]));
+            let target = NSString::from_str("dup");
+            assert_eq!(kvc_index_of(&dict, keys::name(), &target), Some(0));
+        }
+    }
+
+    #[test]
+    fn kvc_index_of_is_case_sensitive() {
+        unsafe {
+            let dict = dict_with_column("name", nsarray(&["Note"]));
+            let target = NSString::from_str("note");
+            assert_eq!(kvc_index_of(&dict, keys::name(), &target), None);
+        }
+    }
+
+    #[test]
+    fn kvc_index_of_returns_none_when_absent() {
+        unsafe {
+            let dict = dict_with_column("name", nsarray(&["one"]));
+            let target = NSString::from_str("missing");
+            assert_eq!(kvc_index_of(&dict, keys::name(), &target), None);
+        }
+    }
+
+    #[test]
+    fn kvc_index_of_returns_none_for_missing_key() {
+        unsafe {
+            let dict = new_dict();
+            let target = NSString::from_str("anything");
+            assert_eq!(kvc_index_of(&dict, keys::name(), &target), None);
+        }
+    }
+
+    #[test]
+    fn take_at_moves_the_value_out() {
+        let mut values = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(take_at(&mut values, 1), "b");
+        assert_eq!(values[1], "");
+    }
+
+    #[test]
+    fn take_at_defaults_when_out_of_range() {
+        let mut values: Vec<String> = Vec::new();
+        assert_eq!(take_at(&mut values, 5), "");
     }
 }

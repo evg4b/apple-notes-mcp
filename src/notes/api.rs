@@ -5,14 +5,12 @@ use objc2::runtime::AnyObject;
 use objc2_foundation::{NSMutableDictionary, NSObject, NSString};
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use super::bridge::SBApplication;
 use super::bridge::{
-    account_info, app_accounts, app_notes, attachment_info, collect_folders,
-    collect_notes_in_folder, collect_notes_in_folders, note_attachments, note_info, obj_folders,
-    obj_notes,
+    SBApplication, account_info, app_accounts, app_notes, collect_folders, collect_notes_in_folder,
+    collect_notes_in_folders, note_info, obj_folders, obj_notes,
 };
-use super::helpers::{kvc_set, kvc_string, kvc_string_vec, sb_at, sb_count};
-use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo, PartialNoteInfo};
+use super::helpers::{keys, kvc_index_of, kvc_set, kvc_string, kvc_string_vec, sb_at, sb_count};
+use super::types::{AccountInfo, FolderInfo, NoteInfo, PartialNoteInfo};
 
 /// A live ScriptingBridge proxy to Notes.app.
 pub struct NotesApp {
@@ -29,31 +27,22 @@ static APPLE_NOTES_BUNDLE_ID: &str = "com.apple.Notes";
 impl NotesApp {
     pub fn connect() -> Result<Self> {
         let bundle_id = NSString::from_str(APPLE_NOTES_BUNDLE_ID);
-
         trace!(
-            bundle_id = %bundle_id.to_string(),
-            "connecting to Notes.app via ScriptingBridge...",
+            bundle_id = APPLE_NOTES_BUNDLE_ID,
+            "connecting via ScriptingBridge"
         );
 
-        let retained_app: Option<Retained<SBApplication>> =
-            unsafe { SBApplication::applicationWithBundleIdentifier(&bundle_id) };
-
-        let sb_app =
-            retained_app.ok_or(anyhow!("Cannot connect to Apple Notes via ScriptingBridge"))?;
-
+        let sb_app = unsafe { SBApplication::applicationWithBundleIdentifier(&bundle_id) }
+            .ok_or_else(|| anyhow!("Cannot connect to Apple Notes via ScriptingBridge"))?;
         let app = Self { sb_app };
 
         match app.list_accounts() {
-            Ok(accounts) if accounts.is_empty() => {
-                warn!(
-                    "Notes returned 0 accounts — Automation permission is probably missing. \
-                     Go to System Settings → Privacy & Security → Automation and allow \
-                     this binary to control Notes.app, then restart."
-                );
-            }
-            Ok(accounts) => {
-                info!(accounts = accounts.len(), "Notes.app connected");
-            }
+            Ok(accounts) if accounts.is_empty() => warn!(
+                "Notes returned 0 accounts — Automation permission is probably missing. \
+                 Go to System Settings → Privacy & Security → Automation and allow \
+                 this binary to control Notes.app, then restart."
+            ),
+            Ok(accounts) => info!(accounts = accounts.len(), "Notes.app connected"),
             Err(e) => {
                 error!(error = %e, "Notes.app probe failed — check Automation permission");
                 return Err(e);
@@ -65,117 +54,88 @@ impl NotesApp {
 
     #[instrument(skip(self))]
     pub fn list_accounts(&self) -> Result<Vec<AccountInfo>> {
-        let result = unsafe {
+        unsafe {
             let arr = app_accounts(&self.sb_app);
             let count = sb_count(&arr);
-            debug!(count, "found accounts");
             let mut out = Vec::with_capacity(count);
             for i in 0..count {
                 out.push(account_info(&sb_at(&arr, i)));
             }
-            out
-        };
-        Ok(result)
+            debug!(count, "listed accounts");
+            Ok(out)
+        }
     }
 
     #[instrument(skip(self))]
     pub fn list_folders(&self) -> Result<Vec<FolderInfo>> {
-        let result = unsafe {
-            let accounts_arr = app_accounts(&self.sb_app);
-            let account_count = sb_count(&accounts_arr);
-            let mut out = Vec::with_capacity(account_count);
-            for i in 0..account_count {
-                let account = sb_at(&accounts_arr, i);
-                let account_name = kvc_string(&account, "name");
-                let folders_arr = obj_folders(&account);
-                let before = out.len();
-                collect_folders(&folders_arr, &account_name, &account_name, &mut out);
-                debug!(account = %account_name, folders = out.len() - before, "collected folders");
-            }
-            out
-        };
-        debug!(total = result.len(), "list_folders complete");
-        Ok(result)
+        unsafe {
+            let mut out = Vec::new();
+            self.for_each_account(|account, account_name| {
+                let folders_arr = obj_folders(account);
+                collect_folders(&folders_arr, account_name, account_name, &mut out);
+            });
+            debug!(total = out.len(), "listed folders");
+            Ok(out)
+        }
     }
 
     #[instrument(skip(self))]
     pub fn get_subfolders(&self, folder_name: &str) -> Result<Vec<FolderInfo>> {
         unsafe {
-            let accounts_arr = app_accounts(&self.sb_app);
-            let account_count = sb_count(&accounts_arr);
-            for i in 0..account_count {
-                let account = sb_at(&accounts_arr, i);
-                let account_name = kvc_string(&account, "name");
-                let folders_arr = obj_folders(&account);
-                let folder_count = sb_count(&folders_arr);
-                for j in 0..folder_count {
-                    let folder = sb_at(&folders_arr, j);
-                    if kvc_string(&folder, "name") == folder_name {
-                        let mut out = Vec::new();
-                        let sub_arr = obj_folders(&folder);
-                        collect_folders(&sub_arr, &account_name, folder_name, &mut out);
-                        debug!(count = out.len(), "found subfolders");
-                        return Ok(out);
-                    }
-                }
-            }
-            debug!("folder not found");
-            Ok(vec![])
+            let mut out = Vec::new();
+            self.with_folder(folder_name, |folder, account_name| {
+                let sub_arr = obj_folders(folder);
+                collect_folders(&sub_arr, account_name, folder_name, &mut out);
+            });
+            debug!(count = out.len(), "listed subfolders");
+            Ok(out)
         }
     }
 
     #[instrument(skip(self))]
     pub fn list_notes(&self) -> Result<Vec<String>> {
-        let result = unsafe {
+        unsafe {
             let arr = app_notes(&self.sb_app);
-            let names = kvc_string_vec(&arr, "name");
-            debug!(count = names.len(), "fetching note titles");
-            names
-        };
-        Ok(result)
+            let names = kvc_string_vec(&arr, keys::name());
+            debug!(count = names.len(), "listed note titles");
+            Ok(names)
+        }
     }
 
     #[instrument(skip(self))]
     pub fn get_all_notes(&self) -> Result<Vec<NoteInfo>> {
-        let result = unsafe {
-            let accounts_arr = app_accounts(&self.sb_app);
-            let account_count = sb_count(&accounts_arr);
-            let mut out = Vec::with_capacity(account_count);
-            for i in 0..account_count {
-                let account = sb_at(&accounts_arr, i);
-                let account_name = kvc_string(&account, "name");
-                let folders_arr = obj_folders(&account);
-                let before = out.len();
-                collect_notes_in_folders(&folders_arr, &account_name, &mut out);
-                debug!(account = %account_name, notes = out.len() - before, "collected notes");
-            }
-            out
-        };
-        debug!(total = result.len(), "get_all_notes complete");
-        Ok(result)
+        unsafe {
+            let mut out = Vec::new();
+            self.for_each_account(|account, account_name| {
+                let folders_arr = obj_folders(account);
+                collect_notes_in_folders(&folders_arr, account_name, &mut out);
+            });
+            debug!(total = out.len(), "collected all notes");
+            Ok(out)
+        }
     }
 
     #[instrument(skip(self))]
     pub fn get_note_by_title(&self, title: &str) -> Result<Option<NoteInfo>> {
         unsafe {
+            let target = NSString::from_str(title);
             let accounts_arr = app_accounts(&self.sb_app);
-            let account_count = sb_count(&accounts_arr);
-            for i in 0..account_count {
+            for i in 0..sb_count(&accounts_arr) {
                 let account = sb_at(&accounts_arr, i);
-                let account_name = kvc_string(&account, "name");
+                let account_name = kvc_string(&account, keys::name());
                 let folders_arr = obj_folders(&account);
                 let folder_count = sb_count(&folders_arr);
                 for j in 0..folder_count {
                     let folder = sb_at(&folders_arr, j);
-                    let folder_name = kvc_string(&folder, "name");
                     let notes_arr = obj_notes(&folder);
-                    // Batch-fetch all titles in this folder: 1 AE instead of 2 per note.
-                    let names = kvc_string_vec(&notes_arr, "name");
-                    if let Some(k) = names.iter().position(|n| n == title) {
-                        let note = sb_at(&notes_arr, k);
-                        debug!(folder = %folder_name, account = %account_name, "note found");
-                        return Ok(Some(note_info(&note, &folder_name, &account_name)));
-                    }
+                    // One batched title fetch per folder, compared as NSStrings.
+                    let Some(k) = kvc_index_of(&notes_arr, keys::name(), &target) else {
+                        continue;
+                    };
+                    let folder_name = kvc_string(&folder, keys::name());
+                    debug!(folder = %folder_name, account = %account_name, "note found");
+                    let note = sb_at(&notes_arr, k);
+                    return Ok(Some(note_info(&note, &folder_name, &account_name)));
                 }
             }
             debug!("note not found");
@@ -186,25 +146,12 @@ impl NotesApp {
     #[instrument(skip(self))]
     pub fn get_notes_in_folder(&self, folder_name: &str) -> Result<Vec<NoteInfo>> {
         unsafe {
-            let accounts_arr = app_accounts(&self.sb_app);
-            let account_count = sb_count(&accounts_arr);
-            for i in 0..account_count {
-                let account = sb_at(&accounts_arr, i);
-                let account_name = kvc_string(&account, "name");
-                let folders_arr = obj_folders(&account);
-                let folder_count = sb_count(&folders_arr);
-                for j in 0..folder_count {
-                    let folder = sb_at(&folders_arr, j);
-                    if kvc_string(&folder, "name") == folder_name {
-                        let mut out = Vec::new();
-                        collect_notes_in_folder(&folder, folder_name, &account_name, &mut out);
-                        debug!(count = out.len(), account = %account_name, "found notes in folder");
-                        return Ok(out);
-                    }
-                }
-            }
-            debug!("folder not found");
-            Ok(vec![])
+            let mut out = Vec::new();
+            self.with_folder(folder_name, |folder, account_name| {
+                collect_notes_in_folder(folder, folder_name, account_name, &mut out);
+            });
+            debug!(count = out.len(), "collected notes in folder");
+            Ok(out)
         }
     }
 
@@ -212,61 +159,15 @@ impl NotesApp {
     pub fn get_notes_in_account(&self, account_name: &str) -> Result<Vec<NoteInfo>> {
         unsafe {
             let accounts_arr = app_accounts(&self.sb_app);
-            let account_count = sb_count(&accounts_arr);
-            for i in 0..account_count {
-                let account = sb_at(&accounts_arr, i);
-                if kvc_string(&account, "name") == account_name {
-                    let mut out = Vec::new();
-                    let folders_arr = obj_folders(&account);
-                    collect_notes_in_folders(&folders_arr, account_name, &mut out);
-                    debug!(count = out.len(), "found notes in account");
-                    return Ok(out);
-                }
-            }
-            debug!("account not found");
-            Ok(vec![])
-        }
-    }
-
-    #[instrument(skip(self))]
-    #[allow(dead_code)]
-    pub fn get_note_attachments_by_title(&self, title: &str) -> Result<Vec<AttachmentInfo>> {
-        unsafe {
-            let arr = app_notes(&self.sb_app);
-            let names = kvc_string_vec(&arr, "name");
-            if let Some(i) = names.iter().position(|n| n == title) {
-                let note = sb_at(&arr, i);
-                let att_arr = note_attachments(&note);
-                let att_count = sb_count(&att_arr);
-                debug!(count = att_count, "found attachments");
-                let mut out = Vec::with_capacity(att_count);
-                for j in 0..att_count {
-                    out.push(attachment_info(&sb_at(&att_arr, j), title));
-                }
-                return Ok(out);
-            }
-            debug!("note not found");
-            Ok(vec![])
-        }
-    }
-
-    #[instrument(skip(self))]
-    #[allow(dead_code)]
-    pub fn get_all_attachments(&self) -> Result<Vec<AttachmentInfo>> {
-        unsafe {
-            let notes_arr = app_notes(&self.sb_app);
-            let note_count = sb_count(&notes_arr);
+            let target = NSString::from_str(account_name);
+            let Some(i) = kvc_index_of(&accounts_arr, keys::name(), &target) else {
+                debug!("account not found");
+                return Ok(Vec::new());
+            };
+            let account = sb_at(&accounts_arr, i);
             let mut out = Vec::new();
-            for i in 0..note_count {
-                let note = sb_at(&notes_arr, i);
-                let note_title = kvc_string(&note, "name");
-                let att_arr = note_attachments(&note);
-                let att_count = sb_count(&att_arr);
-                for j in 0..att_count {
-                    out.push(attachment_info(&sb_at(&att_arr, j), &note_title));
-                }
-            }
-            debug!(total = out.len(), "get_all_attachments complete");
+            collect_notes_in_folders(&obj_folders(&account), account_name, &mut out);
+            debug!(count = out.len(), "collected notes in account");
             Ok(out)
         }
     }
@@ -274,55 +175,21 @@ impl NotesApp {
     #[instrument(skip(self, content))]
     pub fn create_note(&self, title: &str, content: &str) -> Result<PartialNoteInfo> {
         unsafe {
-            let class_name = NSString::from_str("note");
-            // classForScriptingClass: returns the ObjC class object for the scripting class.
-            let note_cls: Option<Retained<AnyObject>> =
-                msg_send![&*self.sb_app, classForScriptingClass: &*class_name];
-            let note_cls = note_cls
-                .context("Notes scripting class 'note' not found — is Notes.app installed?")?;
+            let note = self.new_note_object(title, content)?;
 
-            // Build a properties dictionary with title and body BEFORE inserting the note.
-            // Using initWithProperties: ensures the Apple Event carries both fields at creation
-            // time, which is more reliable than setting them via KVC after insert.
-            let props = NSMutableDictionary::<NSString, NSObject>::new();
-            let name_key = NSString::from_str("name");
-            let name_val = NSString::from_str(title);
-            let body_key = NSString::from_str("body");
-            let body_val = NSString::from_str(content);
-            // setValue:forKey: accepts any NSObject, so we coerce via AnyObject.
-            let _: () = msg_send![&*props, setValue: &*name_val, forKey: &*name_key];
-            let _: () = msg_send![&*props, setValue: &*body_val, forKey: &*body_key];
-
-            // Alloc + initWithProperties: (SBObject initialiser that pre-populates fields).
-            let raw_alloc: *mut AnyObject = msg_send![&*note_cls, alloc];
-            if raw_alloc.is_null() {
-                anyhow::bail!("Failed to allocate note object");
-            }
-            let raw_init: *mut AnyObject = msg_send![raw_alloc, initWithProperties: &*props];
-            let note = Retained::from_raw(raw_init)
-                .ok_or_else(|| anyhow!("Failed to initialize note object"))?;
-
-            // Insert the fully-initialised proxy into the notes collection.
             let arr = app_notes(&self.sb_app);
             let _: () = msg_send![&*arr, insertObject: &*note, atIndex: 0usize];
-
             debug!("note created");
 
-            // Instead of trying to use KVC on an unresolved SBProxyByCode,
-            // we will query the properties using the object retrieved from the array.
-            // Since we just inserted it at index 0, it is at index 0.
-            let resolved: Retained<AnyObject> = sb_at(&arr, 0);
-
-            let id = kvc_string(&resolved, "id");
-            let c_dt = kvc_string(&resolved, "creationDate");
-            let m_dt = kvc_string(&resolved, "modificationDate");
-
+            // The freshly inserted proxy is unresolved; read the stored note back
+            // out of the collection to get its assigned id and dates.
+            let resolved = sb_at(&arr, 0);
             Ok(PartialNoteInfo {
-                id,
-                title: Some(title.to_string()),
-                body: Some(content.to_string()),
-                creation_date: Some(c_dt),
-                modification_date: Some(m_dt),
+                id: kvc_string(&resolved, keys::id()),
+                title: Some(title.to_owned()),
+                body: Some(content.to_owned()),
+                creation_date: Some(kvc_string(&resolved, keys::creation_date())),
+                modification_date: Some(kvc_string(&resolved, keys::modification_date())),
             })
         }
     }
@@ -336,31 +203,27 @@ impl NotesApp {
     ) -> Result<Option<PartialNoteInfo>> {
         unsafe {
             let arr = app_notes(&self.sb_app);
-            let names = kvc_string_vec(&arr, "name");
-            if let Some(i) = names.iter().position(|n| n == title) {
-                let note = sb_at(&arr, i);
-                if let Some(c) = content {
-                    kvc_set(&note, "body", c);
-                }
-                if let Some(t) = new_title {
-                    kvc_set(&note, "name", t);
-                }
-                debug!("note updated");
-                let id = kvc_string(&note, "id");
-                let t_res = new_title.map(|s| s.to_string());
-                let b_res = content.map(|s| s.to_string());
-                let m_dt = kvc_string(&note, "modificationDate");
-
-                return Ok(Some(PartialNoteInfo {
-                    id,
-                    title: t_res,
-                    body: b_res,
-                    creation_date: None,
-                    modification_date: Some(m_dt),
-                }));
+            let target = NSString::from_str(title);
+            let Some(i) = kvc_index_of(&arr, keys::name(), &target) else {
+                debug!("note not found");
+                return Ok(None);
+            };
+            let note = sb_at(&arr, i);
+            if let Some(body) = content {
+                kvc_set(&note, keys::body(), body);
             }
-            debug!("note not found");
-            Ok(None)
+            if let Some(name) = new_title {
+                kvc_set(&note, keys::name(), name);
+            }
+            debug!("note updated");
+
+            Ok(Some(PartialNoteInfo {
+                id: kvc_string(&note, keys::id()),
+                title: new_title.map(str::to_owned),
+                body: content.map(str::to_owned),
+                creation_date: None,
+                modification_date: Some(kvc_string(&note, keys::modification_date())),
+            }))
         }
     }
 
@@ -368,16 +231,73 @@ impl NotesApp {
     pub fn delete_note(&self, title: &str) -> Result<bool> {
         unsafe {
             let arr = app_notes(&self.sb_app);
-            let names = kvc_string_vec(&arr, "name");
-            if let Some(i) = names.iter().position(|n| n == title) {
-                // We can't call `delete` directly on SBObject because it's dynamically resolved.
-                // The correct way in Scripting Bridge to delete an object is to remove it from its parent array.
-                let _: () = msg_send![&*arr, removeObjectAtIndex: i];
-                debug!("note deleted");
-                return Ok(true);
+            let target = NSString::from_str(title);
+            let Some(i) = kvc_index_of(&arr, keys::name(), &target) else {
+                debug!("note not found");
+                return Ok(false);
+            };
+            // SBObject resolves `delete` dynamically; removing the element from
+            // its parent collection is the supported ScriptingBridge spelling.
+            let _: () = msg_send![&*arr, removeObjectAtIndex: i];
+            debug!("note deleted");
+            Ok(true)
+        }
+    }
+
+    /// Allocate a `note` scripting object with its properties already set.
+    ///
+    /// `initWithProperties:` carries both fields in the creation Apple Event,
+    /// which is more reliable than setting them via KVC after insertion.
+    unsafe fn new_note_object(&self, title: &str, content: &str) -> Result<Retained<AnyObject>> {
+        unsafe {
+            let class_name = NSString::from_str("note");
+            let note_cls: Option<Retained<AnyObject>> =
+                msg_send![&*self.sb_app, classForScriptingClass: &*class_name];
+            let note_cls = note_cls
+                .context("Notes scripting class 'note' not found — is Notes.app installed?")?;
+
+            let props = NSMutableDictionary::<NSString, NSObject>::new();
+            let name_val = NSString::from_str(title);
+            let body_val = NSString::from_str(content);
+            let _: () = msg_send![&*props, setValue: &*name_val, forKey: keys::name()];
+            let _: () = msg_send![&*props, setValue: &*body_val, forKey: keys::body()];
+
+            let raw_alloc: *mut AnyObject = msg_send![&*note_cls, alloc];
+            if raw_alloc.is_null() {
+                anyhow::bail!("Failed to allocate note object");
             }
-            debug!("note not found");
-            Ok(false)
+            let raw_init: *mut AnyObject = msg_send![raw_alloc, initWithProperties: &*props];
+            Retained::from_raw(raw_init).ok_or_else(|| anyhow!("Failed to initialize note object"))
+        }
+    }
+
+    /// Run `f` for every account, passing its proxy and name.
+    unsafe fn for_each_account(&self, mut f: impl FnMut(&AnyObject, &str)) {
+        unsafe {
+            let accounts_arr = app_accounts(&self.sb_app);
+            for i in 0..sb_count(&accounts_arr) {
+                let account = sb_at(&accounts_arr, i);
+                let account_name = kvc_string(&account, keys::name());
+                f(&account, &account_name);
+            }
+        }
+    }
+
+    /// Run `f` on the first top-level folder named `folder_name`, in any account.
+    unsafe fn with_folder(&self, folder_name: &str, mut f: impl FnMut(&AnyObject, &str)) {
+        unsafe {
+            let target = NSString::from_str(folder_name);
+            let accounts_arr = app_accounts(&self.sb_app);
+            for i in 0..sb_count(&accounts_arr) {
+                let account = sb_at(&accounts_arr, i);
+                let folders_arr = obj_folders(&account);
+                if let Some(j) = kvc_index_of(&folders_arr, keys::name(), &target) {
+                    let account_name = kvc_string(&account, keys::name());
+                    f(&sb_at(&folders_arr, j), &account_name);
+                    return;
+                }
+            }
+            debug!("folder not found");
         }
     }
 }
