@@ -115,11 +115,11 @@ Options:
 
 ### Scopes
 
-| Scope    | Tools enabled                                                                                                                               |
-|----------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| `read`   | `list_notes`, `get_note`, `get_all_notes`, `get_notes_in_folder`, `get_notes_in_account`, `list_folders`, `get_subfolders`, `list_accounts` |
-| `write`  | `create_note`, `update_note`                                                                                                                |
-| `delete` | `delete_note`                                                                                                                               |
+| Scope    | Tools enabled                                                                                                                                                       |
+|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `read`   | `list_notes`, `get_note`, `search_notes`, `get_all_notes`, `get_notes_in_folder`, `get_notes_in_account`, `get_attachments`, `list_folders`, `get_subfolders`, `list_accounts` |
+| `write`  | `create_note`, `update_note`, `append_to_note`, `move_note`, `create_folder`                                                                                        |
+| `delete` | `delete_note`, `delete_folder`                                                                                                                                      |
 
 `read` is always enabled by default. Combine scopes as needed:
 
@@ -136,5 +136,5 @@ apple-notes-mcp --scopes read,write,delete
 
 ## Documentation
 
-- [Tools reference](docs/tools.md) — all 11 tools with parameters, return shapes, and data-type schemas
+- [Tools reference](docs/tools.md) — all 17 tools with parameters, return shapes, and data-type schemas
 - [Logging & troubleshooting](docs/logging.md) — log file location, log levels, common errors

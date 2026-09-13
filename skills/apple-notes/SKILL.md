@@ -1,11 +1,11 @@
 ---
 name: apple-notes
-description: Use this skill when the user wants to interact with Apple Notes on macOS - creating, reading, updating, deleting, or browsing notes, folders, and accounts. This skill provides direct access to the Apple Notes app through MCP tools backed by ScriptingBridge (no osascript, no child processes).
+description: Use this skill when the user wants to interact with Apple Notes on macOS - creating, reading, searching, updating, deleting, moving, or browsing notes, folders, and accounts. This skill provides direct access to the Apple Notes app through MCP tools backed by ScriptingBridge (no osascript, no child processes).
 ---
 
 # Apple Notes Skill
 
-This skill enables you to manage Apple Notes on macOS through natural language. Use it whenever the user mentions notes,
+Manage Apple Notes on macOS through natural language. Use it whenever the user mentions notes,
 wants to save information to Notes, or needs to retrieve, update, or organize their notes.
 
 ## When to Use This Skill
@@ -13,199 +13,161 @@ wants to save information to Notes, or needs to retrieve, update, or organize th
 Use this skill when the user:
 
 - Wants to create a new note or save information
-- Asks to find or look up a note by title
+- Asks to find or look up a note, by title or by what is written in it
 - Wants to read the contents of a note or all notes
-- Needs to update or edit an existing note's title or body
-- Wants to delete a note
+- Needs to update, append to, or rename an existing note
+- Wants to delete a note, or move one into a different folder
 - Asks to browse notes in a specific folder or account
-- Wants to list folders, subfolders, or accounts
+- Wants to list, create, or delete folders, or list accounts
 - Mentions Apple Notes, Notes app, or "my notes"
 
 ## Available Tools
 
 ### Note Operations
 
-| Tool                   | Scope  | Purpose                                                   |
-|------------------------|--------|-----------------------------------------------------------|
-| `list_notes`           | read   | List every note title (fast — no body fetch)              |
-| `get_note`             | read   | Read full content of one note by exact title              |
-| `get_all_notes`        | read   | Read full content of every note (slow on large libraries) |
-| `get_notes_in_folder`  | read   | Read all notes inside a specific folder                   |
-| `get_notes_in_account` | read   | Read all notes inside a specific account                  |
-| `create_note`          | write  | Create a new note in the default folder                   |
-| `update_note`          | write  | Change a note's title and/or HTML body                    |
-| `delete_note`          | delete | Permanently delete a note (cannot be undone)              |
+| Tool                   | Scope  | Purpose                                                     |
+|------------------------|--------|-------------------------------------------------------------|
+| `list_notes`           | read   | List every note title (fast — no body fetch)                |
+| `get_note`             | read   | Read full content of one note by exact title                |
+| `search_notes`         | read   | Find notes by a case-insensitive fragment of title or body  |
+| `get_all_notes`        | read   | Read full content of every note (slow on large libraries)   |
+| `get_notes_in_folder`  | read   | Read all notes inside a specific folder                     |
+| `get_notes_in_account` | read   | Read all notes inside a specific account                    |
+| `get_attachments`      | read   | List the files attached to a note                           |
+| `create_note`          | write  | Create a note, optionally in a named folder                 |
+| `update_note`          | write  | Replace a note's title and/or HTML body                     |
+| `append_to_note`       | write  | Add HTML to the end of a note, keeping what is there        |
+| `move_note`            | write  | Move a note into another folder                             |
+| `delete_note`          | delete | Permanently delete a note (cannot be undone)                |
 
 ### Folder & Account Operations
 
-| Tool             | Scope | Purpose                                                     |
-|------------------|-------|-------------------------------------------------------------|
-| `list_folders`   | read  | List all folders and subfolders across every account        |
-| `get_subfolders` | read  | List direct and nested subfolders of a specific folder      |
-| `list_accounts`  | read  | List all configured accounts (iCloud, On My Mac, Exchange…) |
+| Tool             | Scope  | Purpose                                                       |
+|------------------|--------|---------------------------------------------------------------|
+| `list_folders`   | read   | List all folders and subfolders across every account          |
+| `get_subfolders` | read   | List direct and nested subfolders of a specific folder        |
+| `list_accounts`  | read   | List all configured accounts (iCloud, On My Mac, Exchange…)   |
+| `create_folder`  | write  | Create a top-level folder in an account                       |
+| `delete_folder`  | delete | Permanently delete a folder **and every note in it**          |
 
 ## Usage Patterns
 
 ### Finding a Note
 
-There is no full-text search tool. Use `list_notes` to browse titles, then `get_note` with the exact title:
-
-```
-User: "Show me my meeting notes"
-Action:
-1. list_notes → scan titles for matches
-2. get_note with the exact matching title
-```
-
-If the user is looking for notes on a topic across many folders:
+`search_notes` is the right first call whenever the exact title is unknown:
 
 ```
 User: "Find all notes about the budget"
-Action: get_all_notes → filter results by inspecting titles and body content
-Note: only use get_all_notes when targeted lookup fails; it is slow on large libraries.
+→ search_notes query="budget"
 ```
+
+It searches titles and bodies by default and returns at most 50 notes. Narrow it with
+`in_body=false` to match titles only, or raise/lower `limit`.
+
+Only reach for `get_all_notes` when the user genuinely wants the whole library — it fetches
+every note's HTML body and is slow.
 
 ### Reading Notes
 
 ```
 User: "What's in my Shopping List note?"
-Action: get_note with title="Shopping List"
+→ get_note title="Shopping List"
 ```
 
 ```
 User: "Show me everything in my Work folder"
-Action:
-1. list_folders → confirm exact folder name
-2. get_notes_in_folder with folder="Work"
+→ list_folders  (confirm exact folder name)
+→ get_notes_in_folder folder="Work"
 ```
 
 ### Creating Notes
 
-Content must be an HTML string. Wrap plain text in `<div>` tags when no special formatting is needed:
-
-```
-User: "Save this summary as a note called Project Plan"
-Action: create_note with title="Project Plan" and content="<div>…</div>"
-```
+Content must be an HTML string. Wrap plain text in `<div>` tags when no special formatting is
+needed:
 
 ```
 User: "Create a shopping list note with milk and eggs"
-Action: create_note with title="Shopping List" and content="<div>milk</div><div>eggs</div>"
+→ create_note title="Shopping List" content="<div>milk</div><div>eggs</div>"
 ```
 
-### Updating Notes
+```
+User: "Save the project plan in my Work folder"
+→ list_folders  (confirm exact folder name)
+→ create_note title="Project Plan" content="<div>…</div>" folder="Work"
+```
 
-Omit `new_title` or `new_content` to leave that field unchanged:
+### Adding to a Note
+
+Use `append_to_note` rather than reading the body and writing it back:
 
 ```
 User: "Add 'butter' to my Shopping List"
-Action:
-1. get_note with title="Shopping List" → read current body
-2. update_note with title="Shopping List" and new_content=<current body with butter appended>
+→ append_to_note title="Shopping List" content="<div>butter</div>"
 ```
+
+Use `update_note` when the user wants to *replace* content or rename the note:
 
 ```
 User: "Rename my 'Draft' note to 'Final Report'"
-Action: update_note with title="Draft" and new_title="Final Report"
+→ update_note title="Draft" new_title="Final Report"
 ```
 
-### Deleting Notes
+### Organising Notes
 
-> **Warning:** `delete_note` permanently deletes the note. It does **not** move it to Recently Deleted. Confirm with the
-> user before deleting.
+```
+User: "Move my Project Plan note into the Archive folder"
+→ list_folders  (confirm exact folder name)
+→ move_note title="Project Plan" folder="Archive"
+```
+
+```
+User: "Make a folder called Receipts"
+→ create_folder name="Receipts"
+```
+
+### Deleting
+
+> **Warning:** deletes are permanent — nothing moves to Recently Deleted. `delete_folder` also
+> destroys every note inside the folder. Confirm with the user before either call.
 
 ```
 User: "Delete my old TODO note"
-Action: delete_note with title="TODO"
-```
-
-### Browsing Accounts and Folders
-
-```
-User: "What accounts do I have in Notes?"
-Action: list_accounts
-```
-
-```
-User: "Show me all my folders"
-Action: list_folders
-```
-
-```
-User: "What subfolders does Work have?"
-Action:
-1. list_folders → confirm exact name of Work folder
-2. get_subfolders with folder="Work"
+→ delete_note title="TODO"
 ```
 
 ## Important Guidelines
 
-1. **Exact title matching**: `get_note`, `update_note`, and `delete_note` require the exact note title. If unsure, call
-   `list_notes` first to find the correct title.
+1. **Exact title matching**: `get_note`, `update_note`, `append_to_note`, `move_note` and
+   `delete_note` require the exact note title. If unsure, call `search_notes` or `list_notes`
+   first.
 
-2. **HTML content**: Notes store their body as HTML. When reading, the `body` field contains HTML tags. When writing,
-   pass an HTML string — plain text wrapped in `<div>` tags works fine.
+2. **HTML content**: Notes store their body as HTML. When reading, `body` contains HTML tags.
+   When writing, pass an HTML string — plain text wrapped in `<div>` tags works fine.
 
-3. **Scope availability**: Tools are only registered if the server was started with the matching scope (
-   `--scopes read,write,delete`). If a write or delete tool is unavailable, inform the user that the server may be
-   running in read-only mode.
+3. **Scope availability**: tools are only registered when the server was started with the
+   matching scope (`--scopes read,write,delete`). If a write or delete tool is unavailable, tell
+   the user the server may be running in read-only mode.
 
-4. **Default account**: `create_note` always creates in the default folder of the default account. There is no parameter
-   to target a specific folder or account on creation.
+4. **Folders are flat on creation**: `create_folder` and `delete_folder` operate on top-level
+   folders only. `create_note` and `move_note` accept any folder name that `list_folders`
+   reports.
 
-5. **Performance**: `get_all_notes` fetches every note's HTML body — avoid it on large libraries. Prefer `get_note`,
-   `get_notes_in_folder`, or `get_notes_in_account` when the scope is known.
+5. **Performance**: prefer `search_notes` for content lookups and `get_note` for a known title.
+   `get_all_notes` fetches every note's HTML body — avoid it on large libraries.
 
-6. **Password-protected notes**: These notes return an empty `body`. Check the `password_protected` field on a
-   `NoteInfo` object and inform the user if it is `true`.
+6. **Password-protected notes**: these return an empty `body`. Check `password_protected` on a
+   `NoteInfo` and tell the user if it is `true`.
 
-7. **macOS only**: This skill only works on macOS. The server communicates directly with Notes.app via ScriptingBridge —
-   no osascript, no cloud API.
+7. **macOS only**: the server talks to Notes.app via ScriptingBridge — no osascript, no cloud
+   API.
 
 ## Error Handling
 
-- **`success: false` from update/delete**: No note matched the given title. Call `list_notes` to find the correct title
-  and retry.
-- **Empty results from all tools**: The Automation permission for Notes has probably not been granted. Direct the user
-  to **System Settings → Privacy & Security → Automation** to enable it for the MCP client.
-- **`body` is empty on a note**: The note is password-protected. Inform the user — it cannot be read or modified through
-  this skill.
-
-## Examples
-
-### Save a conversation summary
-
-```
-User: "Save our discussion about the API design to my notes"
-→ create_note title="API Design Discussion" content="<div>…summary…</div>"
-```
-
-### Daily review
-
-```
-User: "Read my TODO note"
-→ get_note title="TODO"
-```
-
-### Bulk read by folder
-
-```
-User: "What are all the notes in my Archive folder?"
-→ list_folders  (confirm name)
-→ get_notes_in_folder folder="Archive"
-```
-
-### Update and rename in one call
-
-```
-User: "Rename my Draft note to Final Report and clear the body"
-→ update_note title="Draft" new_title="Final Report" new_content="<div></div>"
-```
-
-### Browse all iCloud notes
-
-```
-User: "List all notes in my iCloud account"
-→ list_accounts  (confirm name)
-→ get_notes_in_account account="iCloud"
-```
+- **`success: false` with an `error` field**: the `error` string says what went wrong — usually
+  no note or folder matched the given name. Call `search_notes` or `list_folders` to find the
+  right name and retry.
+- **Empty results from every tool**: the Automation permission for Notes has probably not been
+  granted. Direct the user to **System Settings → Privacy & Security → Automation** to enable
+  Notes for the MCP client.
+- **`body` is empty on a note**: the note is password-protected. It cannot be read or modified
+  through this skill.
