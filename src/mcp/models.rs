@@ -176,3 +176,117 @@ pub(crate) struct FolderWriteResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rmcp::serde_json::{Value, from_value, json, to_value};
+
+    fn parse<T: for<'de> Deserialize<'de>>(value: Value) -> T {
+        from_value(value).expect("request should deserialize")
+    }
+
+    #[test]
+    fn search_defaults_to_body_search_and_the_standard_limit() {
+        let request: SearchRequest = parse(json!({ "query": "budget" }));
+        assert!(request.in_body());
+        assert_eq!(request.limit(), DEFAULT_SEARCH_LIMIT);
+    }
+
+    #[test]
+    fn search_honours_explicit_options() {
+        let request: SearchRequest =
+            parse(json!({ "query": "budget", "in_body": false, "limit": 5 }));
+        assert!(!request.in_body());
+        assert_eq!(request.limit(), 5);
+    }
+
+    #[test]
+    fn search_accepts_a_zero_limit() {
+        let request: SearchRequest = parse(json!({ "query": "x", "limit": 0 }));
+        assert_eq!(request.limit(), 0);
+    }
+
+    #[test]
+    fn create_note_folder_is_optional() {
+        let request: CreateNoteRequest = parse(json!({ "title": "t", "content": "c" }));
+        assert_eq!(request.folder, None);
+
+        let request: CreateNoteRequest =
+            parse(json!({ "title": "t", "content": "c", "folder": "Work" }));
+        assert_eq!(request.folder.as_deref(), Some("Work"));
+    }
+
+    #[test]
+    fn update_note_fields_are_independently_optional() {
+        let request: UpdateNoteRequest = parse(json!({ "title": "t", "new_title": "u" }));
+        assert_eq!(request.new_title.as_deref(), Some("u"));
+        assert_eq!(request.new_content, None);
+    }
+
+    #[test]
+    fn successful_write_omits_the_error_field() {
+        let note = PartialNoteInfo {
+            id: "x-coredata://1".into(),
+            title: Some("t".into()),
+            body: None,
+            creation_date: None,
+            modification_date: None,
+        };
+        let value = to_value(WriteResponse::found(note)).unwrap();
+        assert_eq!(value["success"], json!(true));
+        assert_eq!(value["note"]["id"], json!("x-coredata://1"));
+        assert!(value.get("error").is_none(), "error leaked into success");
+    }
+
+    #[test]
+    fn not_found_write_names_the_missing_note() {
+        let value = to_value(WriteResponse::not_found("Shopping list")).unwrap();
+        assert_eq!(value["success"], json!(false));
+        assert!(value.get("note").is_none(), "note leaked into failure");
+        let error = value["error"].as_str().unwrap();
+        assert!(error.contains("Shopping list"), "unhelpful error: {error}");
+    }
+
+    #[test]
+    fn failed_write_carries_the_reason() {
+        let value = to_value(WriteResponse::failed("Notes refused".into())).unwrap();
+        assert_eq!(value["success"], json!(false));
+        assert_eq!(value["error"], json!("Notes refused"));
+    }
+
+    #[test]
+    fn default_write_response_is_an_unexplained_failure() {
+        let value = to_value(WriteResponse::default()).unwrap();
+        assert_eq!(value["success"], json!(false));
+        assert!(value.get("note").is_none());
+        assert!(value.get("error").is_none());
+    }
+
+    #[test]
+    fn folder_write_response_omits_empty_fields() {
+        let value = to_value(FolderWriteResponse {
+            success: true,
+            folder: None,
+            error: None,
+        })
+        .unwrap();
+        assert_eq!(value, json!({ "success": true }));
+    }
+
+    #[test]
+    fn empty_collection_responses_serialize_as_empty_arrays() {
+        assert_eq!(
+            to_value(NotesResponse::default()).unwrap(),
+            json!({ "notes": [] })
+        );
+        assert_eq!(
+            to_value(AttachmentsResponse::default()).unwrap(),
+            json!({ "attachments": [] })
+        );
+        assert_eq!(
+            to_value(NoteResponse::default()).unwrap(),
+            json!({ "note": null })
+        );
+    }
+}

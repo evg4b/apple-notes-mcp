@@ -66,6 +66,7 @@ impl AppleNotesMCP {
 mod tests {
     use super::*;
     use crate::mcp::Scope;
+    use rmcp::serde_json::Value;
 
     fn tool_names(scopes: ScopeSet) -> Vec<String> {
         AppleNotesMCP::build_router(scopes)
@@ -152,5 +153,59 @@ mod tests {
         names.sort();
         names.dedup();
         assert_eq!(names.len(), total, "duplicate tool names registered");
+    }
+
+    fn input_schema(scopes: ScopeSet, tool: &str) -> Value {
+        let router = AppleNotesMCP::build_router(scopes);
+        let schema = router
+            .get(tool)
+            .unwrap_or_else(|| panic!("{tool} is not registered"))
+            .input_schema
+            .as_ref()
+            .clone();
+        Value::Object(schema)
+    }
+
+    #[test]
+    fn search_notes_requires_only_a_query() {
+        let schema = input_schema(ScopeSet::READ, "search_notes");
+        let properties = schema["properties"].as_object().unwrap();
+        for field in ["query", "in_body", "limit"] {
+            assert!(properties.contains_key(field), "missing {field}");
+        }
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(required, ["query"]);
+    }
+
+    #[test]
+    fn create_note_folder_is_not_required() {
+        let schema = input_schema(ScopeSet::WRITE, "create_note");
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(required.contains(&"title"));
+        assert!(required.contains(&"content"));
+        assert!(!required.contains(&"folder"), "folder should be optional");
+    }
+
+    #[test]
+    fn destructive_tools_warn_in_their_description() {
+        let scopes = ScopeSet::from_iter([Scope::Delete]);
+        for tool in AppleNotesMCP::build_router(scopes).list_all() {
+            let description = tool.description.as_deref().unwrap_or_default();
+            assert!(
+                description.contains("Cannot be undone"),
+                "{} does not warn that it is destructive",
+                tool.name
+            );
+        }
     }
 }
