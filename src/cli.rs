@@ -5,13 +5,14 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[clap(author, version, about)]
 pub(crate) struct Args {
-    /// The scope of access to request from the user. Multiple scopes can be specified.
+    /// Tool groups to enable. Comma-separated; repeatable.
     #[clap(long, value_enum, value_delimiter = ',', default_value = "read")]
     pub(crate) scopes: Vec<Scope>,
-    /// The path to the log file. If not specified, defaults to ~/Library/Logs/apple-notes-mcp.log
+    /// Path to the log file. Defaults to
+    /// ~/Library/Logs/apple-notes-mcp/apple-notes-mcp.log
     #[clap(long)]
     pub(crate) log_file: Option<PathBuf>,
-    /// The log level to use. If not specified, defaults to ERROR.
+    /// Log verbosity. Defaults to ERROR.
     #[clap(long, value_enum)]
     pub(crate) log_level: Option<tracing::Level>,
 }
