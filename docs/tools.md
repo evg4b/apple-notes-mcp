@@ -1,7 +1,17 @@
-# Tools Reference
+# Tools reference
 
-All tools communicate over the MCP stdio transport. Parameters are JSON objects; responses are
-JSON objects as described below.
+Everything here goes over the MCP stdio transport. You send a JSON object of parameters and get
+a JSON object back.
+
+A few things hold across all of them:
+
+- **Names are matched exactly.** There's no fuzzy matching on note or folder titles. When you're
+  not sure of a name, list or search for it first.
+- **Reads never fail loudly.** If Notes refuses a request (usually because the Automation
+  permission hasn't been granted), a read comes back empty rather than erroring. Writes do tell
+  you what went wrong, in an `error` field.
+- **Bodies are plain text unless you ask otherwise.** Pass `format: "html"` when you need the
+  real markup. There's more on why in [Keeping responses small](#keeping-responses-small).
 
 | Tool                                            | Scope    |
 |-------------------------------------------------|----------|
@@ -29,8 +39,8 @@ JSON objects as described below.
 
 ### `list_notes`
 
-Returns the titles of all notes without fetching body content. Use this for a fast overview
-before calling `get_note` on individual items.
+Every note title, and nothing else. This is the cheapest call in the server, because it skips
+bodies entirely. It's the right way to see what's there before pulling any single note.
 
 **Parameters:** none
 
@@ -44,85 +54,106 @@ before calling `get_note` on individual items.
 
 ### `get_note`
 
-Returns full metadata and HTML body for a single note looked up by exact title.
+One note, by its exact title.
 
 **Parameters:**
 
-| Name    | Type   | Description             |
-|---------|--------|-------------------------|
-| `title` | string | Exact title of the note |
+| Name     | Type    | Description                                 |
+|----------|---------|---------------------------------------------|
+| `title`  | string  | Exact title of the note                     |
+| `format` | string? | `"text"` (default) or `"html"`              |
 
-**Returns:** `{ "note": ` [NoteInfo](#noteinfo) ` }` — `note` is `null` when no match is found.
+**Returns:** `{ "note": ` [NoteInfo](#noteinfo) ` }`, with `note` set to `null` if nothing
+matches.
+
+If you're about to rewrite the note with `update_note`, read it back with `format: "html"`
+first. Writing plain text into a note replaces its formatting.
 
 ---
 
 ### `search_notes`
 
-Returns notes whose title — and, by default, body — contains `query`, compared
-case-insensitively. This is the cheapest way to find notes by content: titles are fetched in one
-batch per folder, and the remaining fields only for folders that actually contain a match.
+Finds notes containing `query`, ignoring case. Searches titles and bodies by default.
+
+This is what you want for "find my notes about X". It reads one batch of titles per folder and
+only pulls the full record for folders that actually match, so it's dramatically cheaper than
+fetching everything and filtering afterwards.
 
 **Parameters:**
 
-| Name      | Type     | Description                                        |
-|-----------|----------|----------------------------------------------------|
-| `query`   | string   | Case-insensitive substring to look for             |
-| `in_body` | boolean? | Also search bodies, not just titles. Default `true` |
-| `limit`   | integer? | Maximum number of notes to return. Default `50`    |
+| Name      | Type     | Description                                                  |
+|-----------|----------|--------------------------------------------------------------|
+| `query`   | string   | Substring to look for, matched case-insensitively            |
+| `in_body` | boolean? | Search bodies too, not only titles. Default `true`           |
+| `limit`   | integer? | Most notes to return. Default `50`                           |
+| `format`  | string?  | `"text"` (default) or `"html"`                               |
 
-**Returns:** `{ "notes": [` [NoteInfo](#noteinfo)`, …] }`
+**Returns:** `{ "notes": [` [NoteInfo](#noteinfo)`, …], "truncated": bool }`
+
+Setting `in_body: false` makes the search noticeably faster on a large library, since bodies
+never have to be fetched.
 
 ---
 
 ### `get_all_notes`
 
-Returns full metadata and HTML body for every note across all accounts and folders.
+Every note in every account, bodies included.
 
-**Parameters:** none
+**Parameters:**
 
-**Returns:** `{ "notes": [` [NoteInfo](#noteinfo)`, …] }`
+| Name     | Type     | Description                          |
+|----------|----------|--------------------------------------|
+| `limit`  | integer? | Most notes to return. Default `50`   |
+| `format` | string?  | `"text"` (default) or `"html"`       |
 
-> Fetches the HTML body of every note. On large libraries this is slow — prefer `search_notes`
-> for content lookups and `get_note` for a known title.
+**Returns:** `{ "notes": [` [NoteInfo](#noteinfo)`, …], "truncated": bool }`
+
+> This is the most expensive call here, and usually not the one you want. If you're looking for
+> something, `search_notes` will find it for a fraction of the cost. If you know the title,
+> `get_note` is one call.
+
+The default `limit` exists because an unbounded version of this tool can return a whole library
+in a single response. When the limit cuts the result short, `truncated` comes back `true`.
 
 ---
 
 ### `get_notes_in_folder`
 
-Returns all notes inside a folder, matched by exact folder name.
+Everything in one folder, by exact folder name. Call `list_folders` first if you're guessing at
+the name.
 
 **Parameters:**
 
-| Name     | Type   | Description       |
-|----------|--------|-------------------|
-| `folder` | string | Exact folder name |
+| Name     | Type     | Description                        |
+|----------|----------|------------------------------------|
+| `folder` | string   | Exact folder name                  |
+| `limit`  | integer? | Most notes to return. Default `50` |
+| `format` | string?  | `"text"` (default) or `"html"`     |
 
-**Returns:** `{ "notes": [` [NoteInfo](#noteinfo)`, …] }`
-
-> Call `list_folders` first if the folder name is unknown.
+**Returns:** `{ "notes": [` [NoteInfo](#noteinfo)`, …], "truncated": bool }`
 
 ---
 
 ### `get_notes_in_account`
 
-Returns all notes belonging to a specific account, matched by exact account name.
+Everything belonging to one account. `list_accounts` will tell you what they're called.
 
 **Parameters:**
 
-| Name      | Type   | Description                                    |
-|-----------|--------|------------------------------------------------|
-| `account` | string | Account name, e.g. `"iCloud"` or `"On My Mac"` |
+| Name      | Type     | Description                                    |
+|-----------|----------|------------------------------------------------|
+| `account` | string   | Account name, e.g. `"iCloud"` or `"On My Mac"` |
+| `limit`   | integer? | Most notes to return. Default `50`             |
+| `format`  | string?  | `"text"` (default) or `"html"`                 |
 
-**Returns:** `{ "notes": [` [NoteInfo](#noteinfo)`, …] }`
-
-> Call `list_accounts` first if the account name is unknown.
+**Returns:** `{ "notes": [` [NoteInfo](#noteinfo)`, …], "truncated": bool }`
 
 ---
 
 ### `get_attachments`
 
-Returns the files attached to a note, matched by exact title. Empty when the note has no
-attachments or does not exist.
+The files attached to a note. Comes back empty both when the note has no attachments and when
+there's no such note.
 
 **Parameters:**
 
@@ -138,7 +169,8 @@ attachments or does not exist.
 
 ### `list_folders`
 
-Returns all folders and subfolders across every account, each with its account and parent name.
+Every folder and subfolder across all accounts, each one telling you which account it belongs to
+and what it sits inside. Worth calling before anything that takes a folder name.
 
 **Parameters:** none
 
@@ -148,8 +180,8 @@ Returns all folders and subfolders across every account, each with its account a
 
 ### `get_subfolders`
 
-Returns all direct and nested subfolders of a specific folder, matched by exact folder name.
-Returns an empty list when the folder has no children or does not exist.
+The subfolders of one folder, nested ones included. Empty if the folder has no children, and
+also empty if there's no such folder.
 
 **Parameters:**
 
@@ -163,7 +195,7 @@ Returns an empty list when the folder has no children or does not exist.
 
 ### `list_accounts`
 
-Returns all accounts configured in Apple Notes (iCloud, On My Mac, Exchange, etc.).
+Whatever accounts Notes is configured with: iCloud, On My Mac, Exchange, and so on.
 
 **Parameters:** none
 
@@ -171,13 +203,16 @@ Returns all accounts configured in Apple Notes (iCloud, On My Mac, Exchange, etc
 
 ---
 
-## Write Operations
+## Writing
 
-> Write tools require the `write` scope (`--scopes read,write`).
+These need the `write` scope (`--scopes read,write`).
+
+They all report failure the same way: `success` comes back `false` and `error` says what went
+wrong, so you can tell "there's no note called that" apart from "Notes refused the command".
 
 ### `create_note`
 
-Creates a new note. Without `folder` it lands in the Notes default folder.
+Makes a new note. Without `folder` it goes wherever Notes puts new notes by default.
 
 **Parameters:**
 
@@ -206,9 +241,12 @@ Creates a new note. Without `folder` it lands in the Notes default folder.
 
 ### `update_note`
 
-Replaces the title and/or HTML body of an existing note, matched by exact title. Omit
-`new_title` or `new_content` to leave that field unchanged. To add to a body without replacing
-it, use [`append_to_note`](#append_to_note).
+Replaces a note's title, its body, or both. Leave a field out and it stays as it was.
+
+Be careful with `new_content`: it replaces the whole body, and since it's HTML, writing plain
+text into it flattens the note's formatting. Read the current body with
+`get_note` and `format: "html"` first if you mean to preserve it. To add a line rather than
+rewrite, [`append_to_note`](#append_to_note) is simpler and safer.
 
 **Parameters:**
 
@@ -224,7 +262,8 @@ it, use [`append_to_note`](#append_to_note).
 
 ### `append_to_note`
 
-Appends HTML to the end of a note's body, leaving existing content intact.
+Adds HTML to the end of a note and leaves everything already there alone. This is the right tool
+for "add milk to my shopping list".
 
 **Parameters:**
 
@@ -239,7 +278,8 @@ Appends HTML to the end of a note's body, leaving existing content intact.
 
 ### `move_note`
 
-Moves a note into another folder. The note keeps its id, dates and attachments.
+Moves a note to a different folder. It keeps its id, its dates and its attachments, so this is a
+real move rather than a copy-and-delete.
 
 **Parameters:**
 
@@ -254,7 +294,8 @@ Moves a note into another folder. The note keeps its id, dates and attachments.
 
 ### `create_folder`
 
-Creates a top-level folder. Nested folders are not supported.
+Makes a new top-level folder. You can't create nested ones through this server, though
+`create_note` and `move_note` are happy to use a nested folder that already exists.
 
 **Parameters:**
 
@@ -267,14 +308,16 @@ Creates a top-level folder. Nested folders are not supported.
 
 ---
 
-## Delete Operations
+## Deleting
 
-> Delete tools require the `delete` scope (`--scopes read,delete`).
+These need the `delete` scope (`--scopes read,delete`).
+
+Both are permanent. Nothing here goes to Recently Deleted, and there's no undo. It's worth
+confirming with whoever asked before calling either one.
 
 ### `delete_note`
 
-Permanently deletes a note by exact title. Cannot be undone — the note does **not** go to
-Recently Deleted.
+Deletes a note by exact title, for good.
 
 **Parameters:**
 
@@ -288,8 +331,8 @@ Recently Deleted.
 
 ### `delete_folder`
 
-Permanently deletes a top-level folder **and every note inside it**, matched by exact name.
-Cannot be undone.
+Deletes a folder by exact name, **along with every note inside it**. This is the most
+destructive call in the server.
 
 **Parameters:**
 
@@ -301,34 +344,53 @@ Cannot be undone.
 
 ---
 
-## Data Types
+## Keeping responses small
+
+Whatever a tool returns ends up in the model's context, so size matters more here than in an
+ordinary API. Two defaults do most of the work.
+
+Bodies are plain text unless you ask for HTML. Notes wraps every line in its own `<div>` and
+usually attaches inline styles, so for a typical note the markup outweighs the writing. Stripping
+it more than halves the body. `format: "html"` gives you the original whenever you need it.
+
+Bulk reads stop at 50 notes by default and tell you when they stopped, via `truncated`. Raise
+`limit` deliberately if you want more.
+
+Beyond those, responses leave out what they can: `shared` and `password_protected` only appear
+when true, `truncated` only when it's true, and the optional fields of
+[PartialNoteInfo](#partialnoteinfo) only when the operation actually knows them.
+
+## Data types
 
 ### NoteInfo
 
-Full metadata and HTML body of a single note.
+A note and its body.
 
 ```json
 {
-  "id":                  "x-coredata://…",
-  "title":               "Shopping list",
-  "body":                "<div>…HTML…</div>",
-  "creation_date":       "2024-01-15 09:30:00 +0000",
-  "modification_date":   "2024-03-02 14:05:12 +0000",
-  "folder":              "Personal",
-  "account":             "iCloud",
-  "shared":              false,
-  "password_protected":  false
+  "id":                "x-coredata://…",
+  "title":             "Shopping list",
+  "body":              "milk\neggs\nbutter",
+  "creation_date":     "2024-01-15 09:30:00 +0000",
+  "modification_date": "2024-03-02 14:05:12 +0000",
+  "folder":            "Personal",
+  "account":           "iCloud"
 }
 ```
 
-> Password-protected notes return an empty `body`. Check the `password_protected` field.
+`body` is plain text, or HTML when the request asked for `format: "html"`.
+
+`shared` and `password_protected` are booleans that only appear when they're true. A
+password-protected note always has an empty `body`, which is the one case where empty content
+doesn't mean an empty note.
 
 ---
 
 ### PartialNoteInfo
 
-Partial metadata returned by write operations, which avoid a full re-fetch of the note. All
-fields except `id` are optional and vary by operation.
+What a write already knew about the note it touched. Writes return this instead of re-reading
+the note, which would cost another round of Apple Events for information the caller mostly
+supplied. Everything but `id` is optional and depends on the operation.
 
 ```json
 {
@@ -344,7 +406,7 @@ fields except `id` are optional and vary by operation.
 
 ### FolderInfo
 
-A Notes folder (may be nested inside another folder or directly under an account).
+A folder, which might sit inside another folder or directly under an account.
 
 ```json
 {
@@ -355,14 +417,14 @@ A Notes folder (may be nested inside another folder or directly under an account
 }
 ```
 
-`parent` is the immediate container: the account name for top-level folders, or the parent
-folder name for nested ones.
+`parent` is whatever the folder sits in directly: an account name for top-level folders, another
+folder's name for nested ones.
 
 ---
 
 ### AccountInfo
 
-An account configured in Apple Notes (e.g. iCloud, On My Mac, Exchange).
+One of the accounts Notes is set up with.
 
 ```json
 { "id": "x-coredata://…", "name": "iCloud" }
@@ -385,36 +447,36 @@ A file attached to a note.
 }
 ```
 
-`url` is empty for inline attachments.
+`url` is empty for attachments stored inline rather than as files on disk.
 
 ---
 
 ### WriteResponse
 
-Returned by every note write and by `delete_note`.
+What every note write and `delete_note` give back.
 
 ```json
 { "success": true, "note": { "id": "x-coredata://…" } }
 ```
 
-| Field     | Description                                                            |
-|-----------|------------------------------------------------------------------------|
-| `success` | `true` when the operation applied                                      |
-| `note`    | [PartialNoteInfo](#partialnoteinfo); absent on failure and on delete   |
-| `error`   | Why it failed — no such note, or the reason Notes refused the command  |
+| Field     | Description                                                                    |
+|-----------|--------------------------------------------------------------------------------|
+| `success` | `true` when the operation went through                                         |
+| `note`    | [PartialNoteInfo](#partialnoteinfo). Absent on failure, and always on delete   |
+| `error`   | Why it didn't work: no note by that name, or whatever reason Notes gave        |
 
 ---
 
 ### FolderWriteResponse
 
-Returned by `create_folder` and `delete_folder`.
+What `create_folder` and `delete_folder` give back.
 
 ```json
 { "success": true, "folder": { "id": "x-coredata://…", "name": "Work" } }
 ```
 
-| Field     | Description                                                      |
-|-----------|------------------------------------------------------------------|
-| `success` | `true` when the operation applied                                |
-| `folder`  | [FolderInfo](#folderinfo); absent on failure and on delete       |
-| `error`   | Why it failed. Absent on success                                 |
+| Field     | Description                                                                |
+|-----------|----------------------------------------------------------------------------|
+| `success` | `true` when the operation went through                                     |
+| `folder`  | [FolderInfo](#folderinfo). Absent on failure, and always on delete         |
+| `error`   | Why it didn't work. Absent on success                                      |

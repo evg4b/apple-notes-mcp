@@ -9,41 +9,40 @@
    </p>
 </div>
 
-## Overview
+## What this is
 
-`apple-notes-mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server that
-exposes Apple Notes to AI assistants via the stdio transport. It talks directly to Notes.app
-through [ScriptingBridge](https://developer.apple.com/documentation/scriptingbridge) — no cloud
-API, no osascript, no spawned child processes, no background daemon.
+`apple-notes-mcp` lets an AI assistant read and write the notes you already have in Notes.app.
+It's a [Model Context Protocol](https://modelcontextprotocol.io) server that speaks over stdio,
+and it talks to Notes through
+[ScriptingBridge](https://developer.apple.com/documentation/scriptingbridge) in its own process.
+Nothing goes to the cloud, nothing shells out to `osascript`, and there's no daemon sitting in
+the background.
 
 > [!WARNING]
-> This tool uses the ScriptingBridge API, which Apple does not officially support.
-> It's a low-level interface that may change in future macOS releases.
-> **Use at your own risk**.
+> ScriptingBridge isn't an API Apple officially supports. It works well today, but it's
+> low-level and Apple could change it in any macOS release. **Use at your own risk.**
 
 > [!IMPORTANT]
-> ScriptingBridge performs best on small to medium libraries. Reading every note in a
-> very large library may be slow. Avoid using Apple Notes as a long-term memory store for models.
+> ScriptingBridge is happiest with small and medium libraries. Reading thousands of notes will
+> be slow no matter how well the calls are batched, so it's worth keeping Apple Notes as a place
+> your notes live rather than as a memory store for a model.
 
-## Installation
+## Installing
 
-### Using Homebrew
+With Homebrew:
 
 ```shell
 brew install evg4b/tap/apple-notes-mcp
 ```
 
-### Using Stew
+With Stew:
 
 ```shell
 stew install evg4b/apple-notes-mcp
 ```
 
-### Pre-built binaries
-
-Download the binary for your architecture from the
-[latest release](https://github.com/evg4b/apple-notes-mcp/releases/latest), verify the
-checksum with the bundled `SHA256SUMS.txt`, then install:
+Or grab a binary from the [latest release](https://github.com/evg4b/apple-notes-mcp/releases/latest).
+Check it against the bundled `SHA256SUMS.txt` before you install it:
 
 ```sh
 # Apple Silicon
@@ -57,7 +56,7 @@ chmod +x apple-notes-mcp
 sudo mv apple-notes-mcp /usr/local/bin/
 ```
 
-### Build from source
+Building it yourself needs nothing but a Rust toolchain:
 
 ```sh
 git clone https://github.com/evg4b/apple-notes-mcp
@@ -66,11 +65,11 @@ cargo build --release
 cp target/release/apple-notes-mcp /usr/local/bin/
 ```
 
-## Setup
+## Setting it up
 
 ### Claude Desktop
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -86,16 +85,61 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop. On the first tool call macOS will show an **Automation permission**
-dialog — click OK. If you miss it, go to
-**System Settings → Privacy & Security → Automation** and enable Notes for your client.
+Restart Claude Desktop. The first time it calls a tool, macOS will ask whether to allow
+automation of Notes. Say yes. If you miss the dialog, you can grant it later under
+**System Settings → Privacy & Security → Automation**.
 
-### Other MCP clients
+### Anything else
 
-The server uses the stdio transport (newline-delimited JSON on stdin/stdout).
-Point `command` at the binary path and pass `--scopes` as needed.
+Any client that speaks the stdio transport will work. Point its `command` at the binary and pass
+whichever `--scopes` you want.
 
-## CLI reference
+## Choosing what it can do
+
+Scopes decide which tools exist at all. A tool outside your chosen scopes is never registered,
+so the model can't see it, let alone call it.
+
+| Scope    | What it unlocks                                                                                                                                                               |
+|----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `read`   | `list_notes`, `get_note`, `search_notes`, `get_all_notes`, `get_notes_in_folder`, `get_notes_in_account`, `get_attachments`, `list_folders`, `get_subfolders`, `list_accounts` |
+| `write`  | `create_note`, `update_note`, `append_to_note`, `move_note`, `create_folder`                                                                                                   |
+| `delete` | `delete_note`, `delete_folder`                                                                                                                                                |
+
+You get `read` if you don't ask for anything:
+
+```sh
+# Read-only, the default
+apple-notes-mcp
+
+# Let it write, but not delete
+apple-notes-mcp --scopes read,write
+
+# Everything
+apple-notes-mcp --scopes read,write,delete
+```
+
+Deletes are worth thinking about before you enable them. `delete_note` doesn't move anything to
+Recently Deleted, and `delete_folder` takes every note in the folder with it. Neither can be
+undone.
+
+## Keeping responses small
+
+Reading notes is the expensive part of any MCP server, because whatever comes back lands in the
+model's context and you pay for it. Two defaults keep that under control:
+
+**Bodies come back as plain text.** Notes stores each line as its own `<div>`, usually with
+inline styles attached, so the markup is often bigger than the writing. Stripping it roughly
+halves what a note costs. If you need the real HTML, ask for it with `format: "html"` — you'll
+want that before rewriting a note, so its formatting survives.
+
+**Bulk reads stop at 50 notes.** `get_all_notes` used to hand back every body in your library in
+one go, which is an easy way to fill a context window by accident. Now anything that returns
+many notes takes a `limit`, and the response sets `truncated` when there was more to see.
+
+For finding things, reach for `search_notes` rather than pulling everything down and filtering.
+It only fetches the full record for folders that actually contain a match.
+
+## Command line
 
 ```
 apple-notes-mcp [OPTIONS]
@@ -113,28 +157,8 @@ Options:
   -V, --version                Print version
 ```
 
-### Scopes
+## More reading
 
-| Scope    | Tools enabled                                                                                                                                                       |
-|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `read`   | `list_notes`, `get_note`, `search_notes`, `get_all_notes`, `get_notes_in_folder`, `get_notes_in_account`, `get_attachments`, `list_folders`, `get_subfolders`, `list_accounts` |
-| `write`  | `create_note`, `update_note`, `append_to_note`, `move_note`, `create_folder`                                                                                        |
-| `delete` | `delete_note`, `delete_folder`                                                                                                                                      |
-
-`read` is always enabled by default. Combine scopes as needed:
-
-```sh
-# Read-only (default)
-apple-notes-mcp
-
-# Read + write
-apple-notes-mcp --scopes read,write
-
-# Full access
-apple-notes-mcp --scopes read,write,delete
-```
-
-## Documentation
-
-- [Tools reference](docs/tools.md) — all 17 tools with parameters, return shapes, and data-type schemas
-- [Logging & troubleshooting](docs/logging.md) — log file location, log levels, common errors
+- [Tools reference](docs/tools.md) — what each of the 17 tools takes and gives back
+- [Logging & troubleshooting](docs/logging.md) — where the log lives, and what to do when
+  something isn't working
