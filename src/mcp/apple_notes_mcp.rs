@@ -202,7 +202,7 @@ mod tests {
         for tool in AppleNotesMCP::build_router(scopes).list_all() {
             let description = tool.description.as_deref().unwrap_or_default();
             assert!(
-                description.contains("Cannot be undone"),
+                description.contains("Cannot be undone") || description.contains("gone for good"),
                 "{} does not warn that it is destructive",
                 tool.name
             );

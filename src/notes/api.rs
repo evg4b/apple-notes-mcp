@@ -6,12 +6,13 @@ use objc2_foundation::{NSMutableDictionary, NSObject, NSString};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use super::bridge::{
-    SBApplication, SearchFields, account_info, app_accounts, app_notes, collect_attachments,
-    collect_folders, collect_notes_in_folder, collect_notes_in_folders, note_info, obj_folders,
-    obj_notes, search_notes_in_folders,
+    NoteLocation, SBApplication, SearchFields, account_info, app_accounts, app_notes,
+    collect_attachments, collect_folders, collect_notes_in_folder, collect_notes_in_folders,
+    collect_titles_in_folders, locate_note_in_folders, note_info, obj_folders, obj_notes,
+    search_notes_in_folders,
 };
 use super::helpers::{
-    keys, kvc_index_of, kvc_set, kvc_string, kvc_string_vec, sb_at, sb_count, sb_perform,
+    keys, kvc_bool, kvc_get, kvc_index_of, kvc_set, kvc_string, sb_at, sb_command, sb_count,
 };
 use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo, NotePage, PartialNoteInfo};
 
@@ -86,20 +87,27 @@ impl NotesApp {
     pub fn get_subfolders(&self, folder_name: &str) -> Result<Vec<FolderInfo>> {
         unsafe {
             let mut out = Vec::new();
-            self.with_folder(folder_name, |folder, account_name| {
-                let sub_arr = obj_folders(folder);
-                collect_folders(&sub_arr, account_name, folder_name, &mut out);
-            });
+            if let Some(found) = self.find_folder(folder_name, None) {
+                let sub_arr = obj_folders(&found.folder());
+                collect_folders(&sub_arr, &found.account, folder_name, &mut out);
+            }
             debug!(count = out.len(), "listed subfolders");
             Ok(out)
         }
     }
 
+    /// Every note title outside Recently Deleted.
+    ///
+    /// Walked folder by folder rather than read off the application's flat
+    /// `notes`, which includes trashed notes: a title listed here must be one
+    /// `get_note` can find.
     #[instrument(skip(self))]
     pub fn list_notes(&self) -> Result<Vec<String>> {
         unsafe {
-            let arr = app_notes(&self.sb_app);
-            let names = kvc_string_vec(&arr, keys::name());
+            let mut names = Vec::new();
+            self.for_each_account(|account, _| {
+                collect_titles_in_folders(&obj_folders(account), true, &mut names);
+            });
             debug!(count = names.len(), "listed note titles");
             Ok(names)
         }
@@ -114,38 +122,27 @@ impl NotesApp {
             let mut out = Vec::new();
             self.for_each_account(|account, account_name| {
                 let folders_arr = obj_folders(account);
-                collect_notes_in_folders(&folders_arr, account_name, ceiling, &mut out);
+                collect_notes_in_folders(&folders_arr, account_name, true, ceiling, &mut out);
             });
             debug!(total = out.len(), "collected all notes");
             Ok(NotePage::from_overshoot(out, limit))
         }
     }
 
+    /// The first note titled `title` in any folder or subfolder of any
+    /// account, Recently Deleted aside.
     #[instrument(skip(self))]
     pub fn get_note_by_title(&self, title: &str) -> Result<Option<NoteInfo>> {
         unsafe {
-            let target = NSString::from_str(title);
-            let accounts_arr = app_accounts(&self.sb_app);
-            for i in 0..sb_count(&accounts_arr) {
-                let account = sb_at(&accounts_arr, i);
-                let account_name = kvc_string(&account, keys::name());
-                let folders_arr = obj_folders(&account);
-                let folder_count = sb_count(&folders_arr);
-                for j in 0..folder_count {
-                    let folder = sb_at(&folders_arr, j);
-                    let notes_arr = obj_notes(&folder);
-                    // One batched title fetch per folder, compared as NSStrings.
-                    let Some(k) = kvc_index_of(&notes_arr, keys::name(), &target) else {
-                        continue;
-                    };
-                    let folder_name = kvc_string(&folder, keys::name());
-                    debug!(folder = %folder_name, account = %account_name, "note found");
-                    let note = sb_at(&notes_arr, k);
-                    return Ok(Some(note_info(&note, &folder_name, &account_name)));
-                }
-            }
-            debug!("note not found");
-            Ok(None)
+            let found = self.find_note(title).map(|found| {
+                note_info(
+                    &found.location.note(),
+                    &found.location.folder_name,
+                    &found.account,
+                )
+            });
+            debug!(found = found.is_some(), "note lookup");
+            Ok(found)
         }
     }
 
@@ -154,9 +151,10 @@ impl NotesApp {
         unsafe {
             let ceiling = limit.saturating_add(1);
             let mut out = Vec::new();
-            self.with_folder(folder_name, |folder, account_name| {
-                collect_notes_in_folder(folder, folder_name, account_name, ceiling, &mut out);
-            });
+            if let Some(found) = self.find_folder(folder_name, None) {
+                let folder = found.folder();
+                collect_notes_in_folder(&folder, folder_name, &found.account, ceiling, &mut out);
+            }
             debug!(count = out.len(), "collected notes in folder");
             Ok(NotePage::from_overshoot(out, limit))
         }
@@ -174,7 +172,13 @@ impl NotesApp {
             let account = sb_at(&accounts_arr, i);
             let ceiling = limit.saturating_add(1);
             let mut out = Vec::new();
-            collect_notes_in_folders(&obj_folders(&account), account_name, ceiling, &mut out);
+            collect_notes_in_folders(
+                &obj_folders(&account),
+                account_name,
+                true,
+                ceiling,
+                &mut out,
+            );
             debug!(count = out.len(), "collected notes in account");
             Ok(NotePage::from_overshoot(out, limit))
         }
@@ -205,6 +209,7 @@ impl NotesApp {
                 search_notes_in_folders(
                     &folders_arr,
                     account_name,
+                    true,
                     &needle,
                     fields,
                     ceiling,
@@ -219,14 +224,12 @@ impl NotesApp {
     #[instrument(skip(self))]
     pub fn get_note_attachments(&self, title: &str) -> Result<Vec<AttachmentInfo>> {
         unsafe {
-            let arr = app_notes(&self.sb_app);
-            let target = NSString::from_str(title);
-            let Some(i) = kvc_index_of(&arr, keys::name(), &target) else {
+            let Some(found) = self.find_note(title) else {
                 debug!("note not found");
                 return Ok(Vec::new());
             };
             let mut out = Vec::new();
-            collect_attachments(&sb_at(&arr, i), title, &mut out);
+            collect_attachments(&found.location.note(), title, &mut out);
             debug!(count = out.len(), "collected attachments");
             Ok(out)
         }
@@ -247,10 +250,13 @@ impl NotesApp {
             let collection = match folder {
                 None => app_notes(&self.sb_app),
                 Some(name) => {
-                    let folder = self
-                        .find_folder(name)
+                    // Every account has a "Notes" folder; prefer the one in the
+                    // account Notes itself would create the note in.
+                    let default_account = kvc_string(&*self.default_account()?, keys::name());
+                    let found = self
+                        .find_folder(name, Some(&default_account))
                         .ok_or_else(|| anyhow!("Folder {name:?} not found"))?;
-                    obj_notes(&folder)
+                    obj_notes(&found.folder())
                 }
             };
             let _: () = msg_send![&*collection, insertObject: &*note, atIndex: 0usize];
@@ -277,11 +283,12 @@ impl NotesApp {
         content: Option<&str>,
     ) -> Result<Option<PartialNoteInfo>> {
         unsafe {
-            let Some((arr, i)) = self.find_note(title) else {
+            let Some(found) = self.find_note(title) else {
                 debug!("note not found");
                 return Ok(None);
             };
-            let note = sb_at(&arr, i);
+            let note = found.location.note();
+            ensure_unlocked(&note, title)?;
             if let Some(body) = content {
                 kvc_set(&note, keys::body(), body);
             }
@@ -304,11 +311,14 @@ impl NotesApp {
     #[instrument(skip(self, content))]
     pub fn append_to_note(&self, title: &str, content: &str) -> Result<Option<PartialNoteInfo>> {
         unsafe {
-            let Some((arr, i)) = self.find_note(title) else {
+            let Some(found) = self.find_note(title) else {
                 debug!("note not found");
                 return Ok(None);
             };
-            let note = sb_at(&arr, i);
+            let note = found.location.note();
+            // A locked note reads back with an empty body; writing `content`
+            // over it would be the whole note.
+            ensure_unlocked(&note, title)?;
             let mut body = kvc_string(&note, keys::body());
             body.push_str(content);
             kvc_set(&note, keys::body(), &body);
@@ -324,20 +334,41 @@ impl NotesApp {
         }
     }
 
-    /// Move a note into `folder_name`, keeping its id, dates and attachments.
+    /// Move a note into `folder_name` within its own account, keeping its id,
+    /// dates and attachments.
+    ///
+    /// Moves across accounts are refused: Notes carries them out by trashing
+    /// the original, and the copy it is meant to leave in the destination is
+    /// not reliably there.
     #[instrument(skip(self))]
     pub fn move_note(&self, title: &str, folder_name: &str) -> Result<Option<PartialNoteInfo>> {
         unsafe {
-            let folder = self
-                .find_folder(folder_name)
-                .ok_or_else(|| anyhow!("Folder {folder_name:?} not found"))?;
-            let Some((arr, i)) = self.find_note(title) else {
+            let Some(found) = self.find_note(title) else {
                 debug!("note not found");
                 return Ok(None);
             };
-            let note = sb_at(&arr, i);
-            let moved = sb_perform(&note, objc2::sel!(moveTo:), &folder)
-                .ok_or_else(|| anyhow!("Notes refused to move {title:?} to {folder_name:?}"))?;
+            let dest = self
+                .find_folder(folder_name, Some(&found.account))
+                .ok_or_else(|| anyhow!("Folder {folder_name:?} not found"))?;
+            if dest.account != found.account {
+                anyhow::bail!(
+                    "{title:?} is in account {:?} but folder {folder_name:?} is in {:?}; \
+                     notes cannot be moved between accounts",
+                    found.account,
+                    dest.account
+                );
+            }
+            let folder = dest.folder();
+            let note = found.location.note();
+            let id = NSString::from_str(&kvc_string(&note, keys::id()));
+            sb_command(&note, objc2::sel!(moveTo:), &folder);
+
+            // `move` returns nothing, so confirm it by finding the note in its
+            // destination.
+            let dest_notes = obj_notes(&folder);
+            let index = kvc_index_of(&dest_notes, keys::id(), &id)
+                .ok_or_else(|| anyhow!("Notes did not move {title:?} to {folder_name:?}"))?;
+            let moved = sb_at(&dest_notes, index);
             debug!("note moved");
 
             Ok(Some(PartialNoteInfo {
@@ -350,24 +381,21 @@ impl NotesApp {
         }
     }
 
-    /// Create a top-level folder in `account`, or in the first account when
-    /// `account` is `None`.
+    /// Create a top-level folder in `account`, or in Notes' default account
+    /// when `account` is `None`.
     #[instrument(skip(self))]
     pub fn create_folder(&self, name: &str, account: Option<&str>) -> Result<FolderInfo> {
         unsafe {
-            let accounts_arr = app_accounts(&self.sb_app);
-            let index = match account {
-                None => 0,
+            let account_obj = match account {
+                None => self.default_account()?,
                 Some(account_name) => {
+                    let accounts_arr = app_accounts(&self.sb_app);
                     let target = NSString::from_str(account_name);
-                    kvc_index_of(&accounts_arr, keys::name(), &target)
-                        .ok_or_else(|| anyhow!("Account {account_name:?} not found"))?
+                    let index = kvc_index_of(&accounts_arr, keys::name(), &target)
+                        .ok_or_else(|| anyhow!("Account {account_name:?} not found"))?;
+                    sb_at(&accounts_arr, index)
                 }
             };
-            if sb_count(&accounts_arr) == 0 {
-                anyhow::bail!("Notes reported no accounts — check Automation permission");
-            }
-            let account_obj = sb_at(&accounts_arr, index);
             let account_name = kvc_string(&account_obj, keys::name());
 
             let folder = self.new_object("folder", &[(keys::name(), name)])?;
@@ -375,7 +403,11 @@ impl NotesApp {
             let _: () = msg_send![&*folders_arr, insertObject: &*folder, atIndex: 0usize];
             debug!("folder created");
 
-            let resolved = sb_at(&folders_arr, 0);
+            // Folders are not kept in insertion order, so find the new one by name.
+            let target = NSString::from_str(name);
+            let index = kvc_index_of(&folders_arr, keys::name(), &target)
+                .ok_or_else(|| anyhow!("Notes did not create folder {name:?}"))?;
+            let resolved = sb_at(&folders_arr, index);
             Ok(FolderInfo {
                 id: kvc_string(&resolved, keys::id()),
                 name: name.to_owned(),
@@ -385,36 +417,34 @@ impl NotesApp {
         }
     }
 
-    /// Delete a top-level folder and everything inside it.
+    /// Delete a folder, nested or not, and everything inside it.
     #[instrument(skip(self))]
     pub fn delete_folder(&self, name: &str) -> Result<bool> {
         unsafe {
-            let target = NSString::from_str(name);
-            let accounts_arr = app_accounts(&self.sb_app);
-            for i in 0..sb_count(&accounts_arr) {
-                let account = sb_at(&accounts_arr, i);
-                let folders_arr = obj_folders(&account);
-                if let Some(j) = kvc_index_of(&folders_arr, keys::name(), &target) {
-                    let _: () = msg_send![&*folders_arr, removeObjectAtIndex: j];
-                    debug!("folder deleted");
-                    return Ok(true);
-                }
-            }
-            debug!("folder not found");
-            Ok(false)
+            let Some(found) = self.find_folder(name, None) else {
+                debug!("folder not found");
+                return Ok(false);
+            };
+            let _: () = msg_send![&*found.parent, removeObjectAtIndex: found.index];
+            debug!("folder deleted");
+            Ok(true)
         }
     }
 
+    /// Delete a note. Notes moves it to Recently Deleted in accounts that
+    /// have one; notes already there are never matched, so this cannot erase
+    /// one for good.
     #[instrument(skip(self))]
     pub fn delete_note(&self, title: &str) -> Result<bool> {
         unsafe {
-            let Some((arr, i)) = self.find_note(title) else {
+            let Some(found) = self.find_note(title) else {
                 debug!("note not found");
                 return Ok(false);
             };
             // SBObject resolves `delete` dynamically; removing the element from
             // its parent collection is the supported ScriptingBridge spelling.
-            let _: () = msg_send![&*arr, removeObjectAtIndex: i];
+            let location = found.location;
+            let _: () = msg_send![&*location.notes, removeObjectAtIndex: location.index];
             debug!("note deleted");
             Ok(true)
         }
@@ -453,30 +483,79 @@ impl NotesApp {
         }
     }
 
-    /// Locate a note by exact title across the whole library, returning the
-    /// collection it lives in together with its index.
-    unsafe fn find_note(&self, title: &str) -> Option<(Retained<AnyObject>, usize)> {
+    /// Locate a note by exact title in any folder of any account, skipping
+    /// Recently Deleted.
+    ///
+    /// The application's flat `notes` would be one Apple Event, but it includes
+    /// trashed notes: a write could land on a deleted copy, and deleting that
+    /// copy is permanent.
+    unsafe fn find_note(&self, title: &str) -> Option<FoundNote> {
         unsafe {
-            let arr = app_notes(&self.sb_app);
             let target = NSString::from_str(title);
-            let index = kvc_index_of(&arr, keys::name(), &target)?;
-            Some((arr, index))
+            let mut found = None;
+            self.for_each_account(|account, account_name| {
+                if found.is_none() {
+                    found = locate_note_in_folders(&obj_folders(account), &target, true).map(
+                        |location| FoundNote {
+                            location,
+                            account: account_name.to_owned(),
+                        },
+                    );
+                }
+            });
+            found
         }
     }
 
-    /// Locate a top-level folder by exact name in any account.
-    unsafe fn find_folder(&self, folder_name: &str) -> Option<Retained<AnyObject>> {
+    /// Locate a folder by exact name, top-level or nested, in any account.
+    ///
+    /// The search goes breadth-first across all accounts, so a top-level folder
+    /// wins over a nested one of the same name. `prefer` puts one account's
+    /// folders ahead of the rest at every depth. Each level costs one batched
+    /// name fetch per folder array, plus one count per folder to descend.
+    unsafe fn find_folder(&self, folder_name: &str, prefer: Option<&str>) -> Option<FoundFolder> {
         unsafe {
             let target = NSString::from_str(folder_name);
-            let accounts_arr = app_accounts(&self.sb_app);
-            for i in 0..sb_count(&accounts_arr) {
-                let account = sb_at(&accounts_arr, i);
-                let folders_arr = obj_folders(&account);
-                if let Some(j) = kvc_index_of(&folders_arr, keys::name(), &target) {
-                    return Some(sb_at(&folders_arr, j));
+            let mut level: Vec<(Retained<AnyObject>, String)> = Vec::new();
+            self.for_each_account(|account, account_name| {
+                level.push((obj_folders(account), account_name.to_owned()));
+            });
+            if let Some(preferred) = prefer {
+                level.sort_by_key(|(_, account)| account != preferred);
+            }
+            while !level.is_empty() {
+                for (arr, account) in &level {
+                    if let Some(index) = kvc_index_of(arr, keys::name(), &target) {
+                        return Some(FoundFolder {
+                            parent: arr.clone(),
+                            index,
+                            account: account.clone(),
+                        });
+                    }
                 }
+                let mut next = Vec::new();
+                for (arr, account) in &level {
+                    for i in 0..sb_count(arr) {
+                        next.push((obj_folders(&sb_at(arr, i)), account.clone()));
+                    }
+                }
+                level = next;
             }
             None
+        }
+    }
+
+    /// The account Notes creates new notes in, falling back to the first one.
+    unsafe fn default_account(&self) -> Result<Retained<AnyObject>> {
+        unsafe {
+            if let Some(account) = kvc_get(self.sb_app.as_ref(), keys::default_account()) {
+                return Ok(account);
+            }
+            let accounts_arr = app_accounts(&self.sb_app);
+            if sb_count(&accounts_arr) == 0 {
+                anyhow::bail!("Notes reported no accounts — check Automation permission");
+            }
+            Ok(sb_at(&accounts_arr, 0))
         }
     }
 
@@ -491,22 +570,33 @@ impl NotesApp {
             }
         }
     }
+}
 
-    /// Run `f` on the first top-level folder named `folder_name`, in any account.
-    unsafe fn with_folder(&self, folder_name: &str, mut f: impl FnMut(&AnyObject, &str)) {
-        unsafe {
-            let target = NSString::from_str(folder_name);
-            let accounts_arr = app_accounts(&self.sb_app);
-            for i in 0..sb_count(&accounts_arr) {
-                let account = sb_at(&accounts_arr, i);
-                let folders_arr = obj_folders(&account);
-                if let Some(j) = kvc_index_of(&folders_arr, keys::name(), &target) {
-                    let account_name = kvc_string(&account, keys::name());
-                    f(&sb_at(&folders_arr, j), &account_name);
-                    return;
-                }
-            }
-            debug!("folder not found");
-        }
+/// A note found by [`NotesApp::find_note`], with the account it lives in.
+struct FoundNote {
+    location: NoteLocation,
+    account: String,
+}
+
+/// A folder found by [`NotesApp::find_folder`], kept as its position in the
+/// parent's element array so it can be removed as well as read.
+struct FoundFolder {
+    parent: Retained<AnyObject>,
+    index: usize,
+    account: String,
+}
+
+impl FoundFolder {
+    unsafe fn folder(&self) -> Retained<AnyObject> {
+        unsafe { sb_at(&self.parent, self.index) }
     }
+}
+
+/// Refuse to write to a password-protected note. Notes hides a locked note's
+/// body from scripts, so any edit would be made against an empty body.
+unsafe fn ensure_unlocked(note: &AnyObject, title: &str) -> Result<()> {
+    if unsafe { kvc_bool(note, keys::password_protected()) } {
+        anyhow::bail!("{title:?} is password-protected; unlock it in Notes to edit it");
+    }
+    Ok(())
 }

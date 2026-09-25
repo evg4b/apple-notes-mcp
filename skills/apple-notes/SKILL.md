@@ -1,13 +1,13 @@
 ---
 name: apple-notes
-description: Use this skill when the user wants to interact with Apple Notes on macOS - creating, reading, searching, updating, deleting, moving, or browsing notes, folders, and accounts. This skill provides direct access to the Apple Notes app through MCP tools backed by ScriptingBridge (no osascript, no child processes).
+description: Use this skill when the user wants to interact with Apple Notes on macOS - creating, reading, searching, updating, deleting, moving, or browsing notes, folders, and accounts, through the apple-notes MCP server's tools.
 ---
 
 # Apple Notes
 
 Reach for this whenever the user talks about their notes: saving something, finding something
 they wrote down, tidying up folders. It works against the real Notes.app on their Mac, so
-everything you do here is immediately visible to them, and deletes are permanent.
+everything you do here is immediately visible to them, and some deletes are permanent.
 
 ## When to use it
 
@@ -40,7 +40,7 @@ They may say "Apple Notes", "the Notes app", or just "my notes".
 | `update_note`          | write  | Replace the title, the body, or both                  |
 | `append_to_note`       | write  | Add to the end, keeping what's there                  |
 | `move_note`            | write  | Move a note to a different folder                     |
-| `delete_note`          | delete | Permanent. No Recently Deleted                        |
+| `delete_note`          | delete | iCloud: to Recently Deleted. Elsewhere: permanent     |
 
 ### Folders and accounts
 
@@ -50,7 +50,7 @@ They may say "Apple Notes", "the Notes app", or just "my notes".
 | `get_subfolders` | read   | What's nested under one folder                      |
 | `list_accounts`  | read   | iCloud, On My Mac, Exchange, whatever's configured  |
 | `create_folder`  | write  | New top-level folder                                |
-| `delete_folder`  | delete | Permanent, and takes every note in it               |
+| `delete_folder`  | delete | Permanent, and takes every note in it with it       |
 
 ## How to use them well
 
@@ -146,8 +146,8 @@ User: "Make a folder called Receipts"
 
 ### Deleting
 
-Confirm with the user first. Nothing here is recoverable, and `delete_folder` takes every note
-inside the folder with it.
+Confirm with the user first. `delete_note` sends an iCloud note to Recently Deleted, but in other
+accounts it's permanent. `delete_folder` permanently removes every note inside the folder.
 
 ```
 User: "Delete my old TODO note"
@@ -157,7 +157,17 @@ User: "Delete my old TODO note"
 ## Things worth knowing
 
 **Names must be exact.** Every tool that takes a title or a folder name matches it exactly.
-Search or list first when you're not certain.
+Search or list first when you're not certain. If two notes share a title, tools act on the first
+one found. Tell the user when `list_notes` shows duplicates.
+
+**Every account has a "Notes" folder.** A bare folder name can be ambiguous. `create_note`
+prefers the default account's folder, and `move_note` looks in the note's own account first. The
+other folder tools take the first match, so check `list_folders` when there's more than one
+account.
+
+**Recently Deleted is out of reach.** Trashed notes don't show up in listings, searches or title
+lookups, so nothing can accidentally edit or permanently delete them. To show the user what's
+in the trash, use `get_notes_in_folder folder="Recently Deleted"`.
 
 **Bodies are HTML underneath.** You read plain text by default and write HTML always. Ask for
 `format: "html"` when the markup matters.
@@ -170,7 +180,11 @@ tool is missing, the server is running read-only, and you should tell the user t
 guessing at a workaround.
 
 **Locked notes read as empty.** A password-protected note comes back with an empty body and
-`password_protected: true`. Nothing can be done about that from here; just tell the user.
+`password_protected: true`, and any write to it is refused. Tell the user to unlock it in Notes.
+
+**Moves stay inside one account.** `move_note` refuses to move a note to a folder in another
+account, because Notes would trash the original. If the user asks for that, explain the limit.
+Don't work around it with create-then-delete unless they agree.
 
 **Folders are created flat.** `create_folder` makes top-level folders only, though `create_note`
 and `move_note` will happily use an existing nested folder.
@@ -179,6 +193,9 @@ and `move_note` will happily use an existing nested folder.
 
 **`success: false`** — read the `error` field. Usually it means no note or folder matched the
 name you gave. Search for the right name and try again.
+
+**A read tool returns an error** — Notes couldn't be queried. Report it rather than treating it as
+"no notes".
 
 **Every tool returns nothing** — the Automation permission almost certainly hasn't been granted.
 Point the user at **System Settings → Privacy & Security → Automation** and tell them to enable

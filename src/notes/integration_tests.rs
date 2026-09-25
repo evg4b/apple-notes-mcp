@@ -5,7 +5,9 @@
 //!
 //! They require Notes.app to be installed and the test binary to hold the
 //! Automation permission for it. The write tests create and then remove notes
-//! and folders prefixed with `__apple_notes_mcp_test`.
+//! and folders prefixed with `__apple_notes_mcp_test`. Deleted test notes land
+//! in Recently Deleted, which this server deliberately never touches, so they
+//! stay there until Notes purges them.
 
 use super::api::NotesApp;
 
@@ -359,9 +361,13 @@ fn note_can_be_created_in_and_moved_between_folders() {
         .into_iter()
         .find(|f| f.name != TEST_FOLDER)
         .expect("expected another folder to move into");
-    app.move_note(TEST_NOTE, &default_folder.name).unwrap();
+    let reported = app
+        .move_note(TEST_NOTE, &default_folder.name)
+        .expect("move reported an error")
+        .expect("move reported no such note");
     let moved = app.get_note_by_title(TEST_NOTE).unwrap().unwrap();
     assert_eq!(moved.folder, default_folder.name);
+    assert_eq!(reported.id, moved.id, "move returned the wrong note");
 
     clean(&app);
 }
@@ -385,5 +391,108 @@ fn creating_into_a_missing_folder_is_an_error() {
             .is_err()
     );
     assert!(app.create_folder(TEST_FOLDER, Some(MISSING)).is_err());
+    clean(&app);
+}
+
+#[test]
+#[ignore = "requires Notes.app with Automation permission"]
+fn body_search_ignores_markup() {
+    let app = app();
+    clean(&app);
+    app.create_note(TEST_NOTE, "<div><b>plain words</b></div>", None)
+        .unwrap();
+
+    let hits = app.search_notes("<b>", true, LIMIT).unwrap().notes;
+    assert!(
+        !hits.iter().any(|n| n.title == TEST_NOTE),
+        "search matched the HTML markup rather than the text"
+    );
+    let hits = app.search_notes("plain words", true, LIMIT).unwrap().notes;
+    assert!(hits.iter().any(|n| n.title == TEST_NOTE));
+
+    clean(&app);
+}
+
+#[test]
+#[ignore = "requires Notes.app with Automation permission"]
+fn created_note_keeps_the_requested_title() {
+    let app = app();
+    clean(&app);
+    let created = app
+        .create_note(
+            TEST_NOTE,
+            "<div>a body whose first line differs</div>",
+            None,
+        )
+        .unwrap();
+
+    let note = app
+        .get_note_by_title(TEST_NOTE)
+        .unwrap()
+        .expect("the note is not findable by the title it was created with");
+    assert_eq!(note.id, created.id, "create returned another note's id");
+
+    clean(&app);
+}
+
+#[test]
+#[ignore = "requires Notes.app with Automation permission"]
+fn created_folder_reports_its_own_id() {
+    let app = app();
+    clean(&app);
+    let created = app.create_folder(TEST_FOLDER, None).unwrap();
+    let listed = app
+        .list_folders()
+        .unwrap()
+        .into_iter()
+        .find(|f| f.name == TEST_FOLDER)
+        .expect("created folder is not listed");
+    assert_eq!(created.id, listed.id, "create returned another folder's id");
+    clean(&app);
+}
+
+#[test]
+#[ignore = "requires Notes.app with Automation permission"]
+fn deleted_notes_are_out_of_reach_of_every_title_lookup() {
+    let app = app();
+    clean(&app);
+    app.create_note(TEST_NOTE, "<div>body</div>", None).unwrap();
+    assert!(app.delete_note(TEST_NOTE).unwrap());
+
+    // The trashed copy must not be matched: deleting it again would be permanent.
+    assert!(app.get_note_by_title(TEST_NOTE).unwrap().is_none());
+    assert!(!app.list_notes().unwrap().iter().any(|t| t == TEST_NOTE));
+    assert!(
+        app.append_to_note(TEST_NOTE, "<div>x</div>")
+            .unwrap()
+            .is_none()
+    );
+    assert!(!app.delete_note(TEST_NOTE).unwrap());
+    let hits = app.search_notes(TEST_NOTE, false, LIMIT).unwrap().notes;
+    assert!(hits.is_empty(), "search returned a trashed note: {hits:?}");
+}
+
+#[test]
+#[ignore = "requires Notes.app with Automation permission"]
+fn moving_a_note_to_another_account_is_refused() {
+    let app = app();
+    clean(&app);
+    let created = app.create_note(TEST_NOTE, "<div>body</div>", None).unwrap();
+    let note = app.get_note_by_title(TEST_NOTE).unwrap().unwrap();
+    let Some(elsewhere) = app
+        .list_folders()
+        .unwrap()
+        .into_iter()
+        .find(|f| f.account != note.account && f.name != note.folder)
+    else {
+        clean(&app);
+        return; // Only one account: nothing to test.
+    };
+
+    assert!(app.move_note(TEST_NOTE, &elsewhere.name).is_err());
+    let after = app.get_note_by_title(TEST_NOTE).unwrap().unwrap();
+    assert_eq!(after.id, created.id);
+    assert_eq!(after.folder, note.folder, "the note moved anyway");
+
     clean(&app);
 }

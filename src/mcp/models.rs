@@ -140,7 +140,7 @@ pub(crate) struct MoveNoteRequest {
 pub(crate) struct CreateFolderRequest {
     /// Name for the new folder.
     pub name: String,
-    /// Account to create it in. Defaults to the first.
+    /// Account to create it in. Defaults to Notes' default account.
     pub account: Option<String>,
 }
 

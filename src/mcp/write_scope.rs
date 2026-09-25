@@ -74,8 +74,8 @@ impl AppleNotesMCP {
     }
 
     #[tool(
-        description = "Move a note to another folder, both by exact name. Keeps its id, \
-                       dates and attachments."
+        description = "Move a note to another folder, both by exact name. Within one \
+                       account it keeps its id, dates and attachments."
     )]
     pub fn move_note(&self, p: Parameters<MoveNoteRequest>) -> Result<Json<WriteResponse>, String> {
         let moved = self.app.move_note(&p.0.title, &p.0.folder);
@@ -83,7 +83,7 @@ impl AppleNotesMCP {
     }
 
     #[tool(
-        description = "Create a top-level folder, in the first account unless account \
+        description = "Create a top-level folder, in the default account unless account \
                        says otherwise. Nested folders are not supported."
     )]
     pub fn create_folder(

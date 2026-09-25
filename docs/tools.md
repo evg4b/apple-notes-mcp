@@ -7,9 +7,12 @@ A few things hold across all of them:
 
 - **Names are matched exactly.** There's no fuzzy matching on note or folder titles. When you're
   not sure of a name, list or search for it first.
-- **Reads never fail loudly.** If Notes refuses a request (usually because the Automation
-  permission hasn't been granted), a read comes back empty rather than erroring. Writes do tell
-  you what went wrong, in an `error` field.
+- **An empty read usually means a missing permission.** Without the Automation permission, Notes
+  answers with empty collections, so reads come back empty rather than failing. Any other
+  failure comes back as a tool error, not an empty result. Writes report what went wrong in an
+  `error` field.
+- **Recently Deleted is skipped.** Trashed notes never show up in listings, searches or title
+  lookups, so a write or delete can't land on one.
 - **Bodies are plain text unless you ask otherwise.** Pass `format: "html"` when you need the
   real markup. There's more on why in [Keeping responses small](#keeping-responses-small).
 
@@ -42,6 +45,9 @@ A few things hold across all of them:
 Every note title, and nothing else. This is the cheapest call in the server, because it skips
 bodies entirely. It's the right way to see what's there before pulling any single note.
 
+Notes in Recently Deleted are left out, here and in every other tool. The only way to see them is
+`get_notes_in_folder` with `folder: "Recently Deleted"`.
+
 **Parameters:** none
 
 **Returns:**
@@ -54,7 +60,8 @@ bodies entirely. It's the right way to see what's there before pulling any singl
 
 ### `get_note`
 
-One note, by its exact title.
+One note, by its exact title. It searches every folder and subfolder. If two notes share a title,
+you get the first one found.
 
 **Parameters:**
 
@@ -90,6 +97,9 @@ fetching everything and filtering afterwards.
 
 **Returns:** `{ "notes": [` [NoteInfo](#noteinfo)`, …], "truncated": bool }`
 
+Bodies are matched on their plain text, not the HTML, so searching for `div` or `&` won't match
+every note through its markup.
+
 Setting `in_body: false` makes the search noticeably faster on a large library, since bodies
 never have to be fetched.
 
@@ -119,8 +129,11 @@ in a single response. When the limit cuts the result short, `truncated` comes ba
 
 ### `get_notes_in_folder`
 
-Everything in one folder, by exact folder name. Call `list_folders` first if you're guessing at
-the name.
+Everything in one folder, top-level or nested, by exact folder name. Subfolders' notes aren't
+included. Call `list_folders` first if you're guessing at the name.
+
+Every account has a folder called "Notes", so a name can be ambiguous. When it is, you get the
+first account's folder. Top-level folders are checked before nested ones.
 
 **Parameters:**
 
@@ -212,7 +225,8 @@ wrong, so you can tell "there's no note called that" apart from "Notes refused t
 
 ### `create_note`
 
-Makes a new note. Without `folder` it goes wherever Notes puts new notes by default.
+Makes a new note. Without `folder` it goes wherever Notes puts new notes by default. With
+`folder`, a folder of that name in the default account wins over one in any other account.
 
 **Parameters:**
 
@@ -242,6 +256,8 @@ Makes a new note. Without `folder` it goes wherever Notes puts new notes by defa
 ### `update_note`
 
 Replaces a note's title, its body, or both. Leave a field out and it stays as it was.
+Password-protected notes are refused, here and in `append_to_note`, because Notes hides their
+bodies from scripts.
 
 Be careful with `new_content`: it replaces the whole body, and since it's HTML, writing plain
 text into it flattens the note's formatting. Read the current body with
@@ -278,8 +294,12 @@ for "add milk to my shopping list".
 
 ### `move_note`
 
-Moves a note to a different folder. It keeps its id, its dates and its attachments, so this is a
-real move rather than a copy-and-delete.
+Moves a note to a different folder in the same account. It keeps its id, its dates and its
+attachments, so this is a real move rather than a copy-and-delete. The destination folder is
+looked up in the note's own account first.
+
+Moving to a folder in another account is refused. Notes handles that kind of move by trashing
+the original, and the copy doesn't reliably show up in the destination.
 
 **Parameters:**
 
@@ -302,7 +322,7 @@ Makes a new top-level folder. You can't create nested ones through this server, 
 | Name      | Type    | Description                                         |
 |-----------|---------|-----------------------------------------------------|
 | `name`    | string  | Name of the new folder                              |
-| `account` | string? | Account to create it in. Default: the first account |
+| `account` | string? | Account to create it in. Default: Notes' default account |
 
 **Returns:** [FolderWriteResponse](#folderwriteresponse)
 
@@ -312,12 +332,13 @@ Makes a new top-level folder. You can't create nested ones through this server, 
 
 These need the `delete` scope (`--scopes read,delete`).
 
-Both are permanent. Nothing here goes to Recently Deleted, and there's no undo. It's worth
-confirming with whoever asked before calling either one.
+Confirm with whoever asked before calling either one.
 
 ### `delete_note`
 
-Deletes a note by exact title, for good.
+Deletes a note by exact title. In an iCloud account the note goes to Recently Deleted, where the
+user can recover it. In other accounts (IMAP, for instance) it's gone for good. Notes already in
+Recently Deleted are never matched, so this can't permanently erase a trashed note.
 
 **Parameters:**
 
@@ -331,8 +352,8 @@ Deletes a note by exact title, for good.
 
 ### `delete_folder`
 
-Deletes a folder by exact name, **along with every note inside it**. This is the most
-destructive call in the server.
+Deletes a folder by exact name, top-level or nested, **along with every note inside it**. Those
+notes do not go to Recently Deleted. This is the most destructive call in the server.
 
 **Parameters:**
 

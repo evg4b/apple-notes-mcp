@@ -1,10 +1,11 @@
 use super::helpers::{
-    contains_ignore_case, keys, kvc_bool, kvc_bool_vec, kvc_string, kvc_string_vec, sb_at,
-    sb_collection, sb_count, take_at,
+    contains_ignore_case, keys, kvc_bool, kvc_bool_vec, kvc_index_of, kvc_string, kvc_string_vec,
+    sb_at, sb_collection, sb_count, take_at,
 };
 use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
+use objc2_foundation::NSString;
 
 pub use objc2_scripting_bridge::SBApplication;
 
@@ -85,6 +86,93 @@ pub(super) unsafe fn collect_folders(
     }
 }
 
+/// Name of the top-level folder that iCloud accounts keep deleted notes in.
+///
+/// Notes exposes it as an ordinary folder, and its notes as ordinary notes, so
+/// without this check a title lookup can land on a trashed copy, and deleting
+/// that copy is permanent. The scripting dictionary has no property that marks
+/// the folder, so it is recognised by name; Notes reports it in English.
+const RECENTLY_DELETED: &str = "Recently Deleted";
+
+/// Whether the folder named `name` at the given depth is Recently Deleted.
+/// Only a top-level folder can be; a user folder nested somewhere with the
+/// same name is left alone.
+pub(super) fn is_trash(name: &str, top_level: bool) -> bool {
+    top_level && name == RECENTLY_DELETED
+}
+
+/// Where a note sits: its folder's element array and its index in it, which
+/// is enough to read it, write it, or remove it.
+pub(super) struct NoteLocation {
+    pub notes: Retained<AnyObject>,
+    pub index: usize,
+    pub folder_name: String,
+}
+
+impl NoteLocation {
+    pub unsafe fn note(&self) -> Retained<AnyObject> {
+        unsafe { sb_at(&self.notes, self.index) }
+    }
+}
+
+/// Find the first note titled `target` in a folder array or anything nested
+/// under it, skipping Recently Deleted. Costs one batched title fetch per
+/// folder plus one name fetch per level.
+pub(super) unsafe fn locate_note_in_folders(
+    folders_arr: &AnyObject,
+    target: &NSString,
+    top_level: bool,
+) -> Option<NoteLocation> {
+    let count = unsafe { sb_count(folders_arr) };
+    if count == 0 {
+        return None;
+    }
+    let mut names = unsafe { kvc_string_vec(folders_arr, keys::name()) };
+    for i in 0..count {
+        let folder_name = take_at(&mut names, i);
+        if is_trash(&folder_name, top_level) {
+            continue;
+        }
+        let folder = unsafe { sb_at(folders_arr, i) };
+        let notes_arr = unsafe { obj_notes(&folder) };
+        if let Some(index) = unsafe { kvc_index_of(&notes_arr, keys::name(), target) } {
+            return Some(NoteLocation {
+                notes: notes_arr,
+                index,
+                folder_name,
+            });
+        }
+        let sub_arr = unsafe { obj_folders(&folder) };
+        if let Some(found) = unsafe { locate_note_in_folders(&sub_arr, target, false) } {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Collect the title of every note in a folder array, recursing into
+/// subfolders and skipping Recently Deleted. One batched fetch per folder.
+pub(super) unsafe fn collect_titles_in_folders(
+    folders_arr: &AnyObject,
+    top_level: bool,
+    out: &mut Vec<String>,
+) {
+    let count = unsafe { sb_count(folders_arr) };
+    if count == 0 {
+        return;
+    }
+    let names = unsafe { kvc_string_vec(folders_arr, keys::name()) };
+    for i in 0..count {
+        if names.get(i).is_some_and(|name| is_trash(name, top_level)) {
+            continue;
+        }
+        let folder = unsafe { sb_at(folders_arr, i) };
+        out.extend(unsafe { kvc_string_vec(&obj_notes(&folder), keys::name()) });
+        let sub_arr = unsafe { obj_folders(&folder) };
+        unsafe { collect_titles_in_folders(&sub_arr, false, out) };
+    }
+}
+
 /// Collect every note of a folder, batch-fetching one property at a time.
 ///
 /// Each `kvc_*_vec` call is a single "get every note's <property>" Apple Event,
@@ -133,10 +221,12 @@ pub(super) unsafe fn collect_notes_in_folder(
     }
 }
 
-/// Collect the notes of every folder in a folder array, recursing into subfolders.
+/// Collect the notes of every folder in a folder array, recursing into
+/// subfolders and skipping Recently Deleted.
 pub(super) unsafe fn collect_notes_in_folders(
     folders_arr: &AnyObject,
     account_name: &str,
+    top_level: bool,
     ceiling: usize,
     out: &mut Vec<NoteInfo>,
 ) {
@@ -149,11 +239,14 @@ pub(super) unsafe fn collect_notes_in_folders(
         if out.len() >= ceiling {
             return;
         }
-        let folder = unsafe { sb_at(folders_arr, i) };
         let folder_name = take_at(&mut names, i);
+        if is_trash(&folder_name, top_level) {
+            continue;
+        }
+        let folder = unsafe { sb_at(folders_arr, i) };
         unsafe { collect_notes_in_folder(&folder, &folder_name, account_name, ceiling, out) };
         let sub_arr = unsafe { obj_folders(&folder) };
-        unsafe { collect_notes_in_folders(&sub_arr, account_name, ceiling, out) };
+        unsafe { collect_notes_in_folders(&sub_arr, account_name, false, ceiling, out) };
     }
 }
 
@@ -195,13 +288,17 @@ pub(super) struct SearchFields {
 }
 
 /// Search a folder array recursively, appending matches until `limit` is hit.
+/// Recently Deleted is skipped.
 ///
-/// Titles (and bodies, when searched) are batch-fetched per folder. The
-/// remaining five columns are only fetched for folders that actually contain a
-/// match, so scanning a large library costs one or two Apple Events per folder.
+/// Titles (and plain-text bodies, when searched) are batch-fetched per folder.
+/// Bodies are matched on Notes' own `plaintext`, not the HTML, so a query such
+/// as "div" or "&" does not hit every note through its markup. The remaining
+/// columns are only fetched for folders that actually contain a match, so
+/// scanning a large library costs one or two Apple Events per folder.
 pub(super) unsafe fn search_notes_in_folders(
     folders_arr: &AnyObject,
     account_name: &str,
+    top_level: bool,
     query: &str,
     fields: SearchFields,
     limit: usize,
@@ -216,8 +313,11 @@ pub(super) unsafe fn search_notes_in_folders(
         if out.len() >= limit {
             return;
         }
-        let folder = unsafe { sb_at(folders_arr, i) };
         let folder_name = take_at(&mut folder_names, i);
+        if is_trash(&folder_name, top_level) {
+            continue;
+        }
+        let folder = unsafe { sb_at(folders_arr, i) };
         unsafe {
             search_notes_in_folder(
                 &folder,
@@ -230,7 +330,9 @@ pub(super) unsafe fn search_notes_in_folders(
             )
         };
         let sub_arr = unsafe { obj_folders(&folder) };
-        unsafe { search_notes_in_folders(&sub_arr, account_name, query, fields, limit, out) };
+        unsafe {
+            search_notes_in_folders(&sub_arr, account_name, false, query, fields, limit, out)
+        };
     }
 }
 
@@ -249,8 +351,8 @@ unsafe fn search_notes_in_folder(
         return;
     }
     let mut names = unsafe { kvc_string_vec(&notes_arr, keys::name()) };
-    let mut bodies = if fields.body {
-        unsafe { kvc_string_vec(&notes_arr, keys::body()) }
+    let texts = if fields.body {
+        unsafe { kvc_string_vec(&notes_arr, keys::plaintext()) }
     } else {
         Vec::new()
     };
@@ -259,10 +361,8 @@ unsafe fn search_notes_in_folder(
         .filter(|&i| {
             let title_hit =
                 fields.title && names.get(i).is_some_and(|n| contains_ignore_case(n, query));
-            let body_hit = fields.body
-                && bodies
-                    .get(i)
-                    .is_some_and(|b| contains_ignore_case(b, query));
+            let body_hit =
+                fields.body && texts.get(i).is_some_and(|t| contains_ignore_case(t, query));
             title_hit || body_hit
         })
         .take(limit.saturating_sub(out.len()))
@@ -272,9 +372,7 @@ unsafe fn search_notes_in_folder(
     }
 
     let mut ids = unsafe { kvc_string_vec(&notes_arr, keys::id()) };
-    if !fields.body {
-        bodies = unsafe { kvc_string_vec(&notes_arr, keys::body()) };
-    }
+    let mut bodies = unsafe { kvc_string_vec(&notes_arr, keys::body()) };
     let mut created = unsafe { kvc_string_vec(&notes_arr, keys::creation_date()) };
     let mut modified = unsafe { kvc_string_vec(&notes_arr, keys::modification_date()) };
     let shared = unsafe { kvc_bool_vec(&notes_arr, keys::shared()) };

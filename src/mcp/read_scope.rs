@@ -9,18 +9,16 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{Json, tool};
 use tracing::{info, warn};
 
-/// Degrade a failed scripting call to an empty payload.
+/// Report a failed scripting call as a tool error.
 ///
-/// A missing Automation permission or a transient Apple Event failure should
-/// read as "nothing found" to the client rather than aborting the tool call.
-fn or_empty<T: Default>(tool: &'static str, result: Result<T>) -> T {
-    match result {
-        Ok(value) => value,
-        Err(error) => {
-            warn!(tool, %error, "read failed");
-            T::default()
-        }
-    }
+/// An empty payload would tell the client "nothing matched", and it would act
+/// on that — offer to create a note that already exists, say. An error keeps
+/// "Notes could not be read" distinct from "there is nothing there".
+fn read<T>(tool: &'static str, result: Result<T>) -> Result<T, String> {
+    result.map_err(|error| {
+        warn!(tool, %error, "read failed");
+        error.to_string()
+    })
 }
 
 fn notes_ok(tool: &'static str, response: NotesResponse) -> Result<Json<NotesResponse>, String> {
@@ -42,7 +40,7 @@ impl AppleNotesMCP {
         &self,
         _p: Parameters<EmptyRequest>,
     ) -> Result<Json<NoteTitlesResponse>, String> {
-        let titles = or_empty("list_notes", self.app.list_notes());
+        let titles = read("list_notes", self.app.list_notes())?;
         info!(tool = "list_notes", count = titles.len(), "ok");
         Ok(Json(NoteTitlesResponse { titles }))
     }
@@ -52,7 +50,7 @@ impl AppleNotesMCP {
                        matches — search_notes first when unsure of the title."
     )]
     pub fn get_note(&self, p: Parameters<GetNoteRequest>) -> Result<Json<NoteResponse>, String> {
-        let note = or_empty("get_note", self.app.get_note_by_title(&p.0.title));
+        let note = read("get_note", self.app.get_note_by_title(&p.0.title))?;
         info!(tool = "get_note", found = note.is_some(), "ok");
         Ok(Json(NoteResponse::new(
             note,
@@ -68,35 +66,38 @@ impl AppleNotesMCP {
         &self,
         p: Parameters<SearchRequest>,
     ) -> Result<Json<NotesResponse>, String> {
-        let page = or_empty(
+        let page = read(
             "search_notes",
             self.app
                 .search_notes(&p.0.query, p.0.in_body(), p.0.body.limit()),
-        );
+        )?;
         notes_ok("search_notes", NotesResponse::new(page, p.0.body.format()))
     }
 
     #[tool(
-        description = "Every note with its body, newest account first. Expensive — use \
+        description = "Every note with its body, account by account. Expensive — use \
                        search_notes to find content and get_note for one known title."
     )]
     pub fn get_all_notes(
         &self,
         p: Parameters<BulkNotesRequest>,
     ) -> Result<Json<NotesResponse>, String> {
-        let page = or_empty("get_all_notes", self.app.get_all_notes(p.0.body.limit()));
+        let page = read("get_all_notes", self.app.get_all_notes(p.0.body.limit()))?;
         notes_ok("get_all_notes", NotesResponse::new(page, p.0.body.format()))
     }
 
-    #[tool(description = "Notes in one folder, by exact folder name. See list_folders.")]
+    #[tool(
+        description = "Notes in one folder, nested or not, by exact name. Subfolders' \
+                          notes are not included. See list_folders."
+    )]
     pub fn get_notes_in_folder(
         &self,
         p: Parameters<FolderNotesRequest>,
     ) -> Result<Json<NotesResponse>, String> {
-        let page = or_empty(
+        let page = read(
             "get_notes_in_folder",
             self.app.get_notes_in_folder(&p.0.folder, p.0.body.limit()),
-        );
+        )?;
         notes_ok(
             "get_notes_in_folder",
             NotesResponse::new(page, p.0.body.format()),
@@ -108,11 +109,11 @@ impl AppleNotesMCP {
         &self,
         p: Parameters<AccountNotesRequest>,
     ) -> Result<Json<NotesResponse>, String> {
-        let page = or_empty(
+        let page = read(
             "get_notes_in_account",
             self.app
                 .get_notes_in_account(&p.0.account, p.0.body.limit()),
-        );
+        )?;
         notes_ok(
             "get_notes_in_account",
             NotesResponse::new(page, p.0.body.format()),
@@ -124,7 +125,7 @@ impl AppleNotesMCP {
         &self,
         p: Parameters<TitleRequest>,
     ) -> Result<Json<AttachmentsResponse>, String> {
-        let attachments = or_empty("get_attachments", self.app.get_note_attachments(&p.0.title));
+        let attachments = read("get_attachments", self.app.get_note_attachments(&p.0.title))?;
         info!(tool = "get_attachments", count = attachments.len(), "ok");
         Ok(Json(AttachmentsResponse { attachments }))
     }
@@ -137,7 +138,7 @@ impl AppleNotesMCP {
         &self,
         _p: Parameters<EmptyRequest>,
     ) -> Result<Json<FoldersResponse>, String> {
-        let folders = or_empty("list_folders", self.app.list_folders());
+        let folders = read("list_folders", self.app.list_folders())?;
         info!(tool = "list_folders", count = folders.len(), "ok");
         Ok(Json(FoldersResponse { folders }))
     }
@@ -147,7 +148,7 @@ impl AppleNotesMCP {
         &self,
         p: Parameters<FolderRequest>,
     ) -> Result<Json<FoldersResponse>, String> {
-        let folders = or_empty("get_subfolders", self.app.get_subfolders(&p.0.folder));
+        let folders = read("get_subfolders", self.app.get_subfolders(&p.0.folder))?;
         info!(tool = "get_subfolders", count = folders.len(), "ok");
         Ok(Json(FoldersResponse { folders }))
     }
@@ -157,7 +158,7 @@ impl AppleNotesMCP {
         &self,
         _p: Parameters<EmptyRequest>,
     ) -> Result<Json<AccountsResponse>, String> {
-        let accounts = or_empty("list_accounts", self.app.list_accounts());
+        let accounts = read("list_accounts", self.app.list_accounts())?;
         info!(tool = "list_accounts", count = accounts.len(), "ok");
         Ok(Json(AccountsResponse { accounts }))
     }

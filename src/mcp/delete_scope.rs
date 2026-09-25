@@ -6,8 +6,8 @@ use tracing::{info, warn};
 
 impl AppleNotesMCP {
     #[tool(
-        description = "Delete a note by exact title. Cannot be undone — it does not go \
-                       to Recently Deleted."
+        description = "Delete a note by exact title. iCloud moves it to Recently Deleted; \
+                       in other accounts it is gone for good. Confirm first."
     )]
     pub fn delete_note(&self, p: Parameters<TitleRequest>) -> Result<Json<WriteResponse>, String> {
         let response = match self.app.delete_note(&p.0.title) {

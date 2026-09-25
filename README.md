@@ -118,9 +118,9 @@ apple-notes-mcp --scopes read,write
 apple-notes-mcp --scopes read,write,delete
 ```
 
-Deletes are worth thinking about before you enable them. `delete_note` doesn't move anything to
-Recently Deleted, and `delete_folder` takes every note in the folder with it. Neither can be
-undone.
+Deletes are worth thinking about before you enable them. `delete_note` sends iCloud notes to
+Recently Deleted, but in other accounts the note is gone for good. `delete_folder` takes every
+note in the folder with it, and there's no getting those back.
 
 ## Keeping responses small
 
