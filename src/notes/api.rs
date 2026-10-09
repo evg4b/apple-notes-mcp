@@ -6,10 +6,9 @@ use objc2_foundation::{NSMutableDictionary, NSObject, NSString};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use super::bridge::{
-    NoteLocation, SBApplication, SearchFields, account_info, app_accounts, app_notes,
-    collect_attachments, collect_folders, collect_notes_in_folder, collect_notes_in_folders,
-    collect_titles_in_folders, locate_note_in_folders, note_info, obj_folders, obj_notes,
-    search_notes_in_folders,
+    NoteLocation, SBApplication, SearchFields, account_info, app_accounts, collect_attachments,
+    collect_folders, collect_notes_in_folder, collect_notes_in_folders, collect_titles_in_folders,
+    locate_note_in_folders, note_info, obj_folders, obj_notes, search_notes_in_folders,
 };
 use super::helpers::{
     keys, kvc_bool, kvc_get, kvc_index_of, kvc_set, kvc_string, sb_at, sb_command, sb_count,
@@ -103,7 +102,7 @@ impl NotesApp {
         unsafe {
             let mut names = Vec::new();
             self.for_each_account(|account, _| {
-                collect_titles_in_folders(&obj_folders(account), true, &mut names);
+                collect_titles_in_folders(&obj_folders(account), &mut names);
             });
             debug!(count = names.len(), "listed note titles");
             Ok(names)
@@ -117,7 +116,7 @@ impl NotesApp {
             let mut out = Vec::new();
             self.for_each_account(|account, account_name| {
                 let folders_arr = obj_folders(account);
-                collect_notes_in_folders(&folders_arr, account_name, true, ceiling, &mut out);
+                collect_notes_in_folders(&folders_arr, account_name, ceiling, &mut out);
             });
             debug!(total = out.len(), "collected all notes");
             Ok(NotePage::from_overshoot(out, limit))
@@ -165,13 +164,7 @@ impl NotesApp {
             let account = sb_at(&accounts_arr, i);
             let ceiling = limit.saturating_add(1);
             let mut out = Vec::new();
-            collect_notes_in_folders(
-                &obj_folders(&account),
-                account_name,
-                true,
-                ceiling,
-                &mut out,
-            );
+            collect_notes_in_folders(&obj_folders(&account), account_name, ceiling, &mut out);
             debug!(count = out.len(), "collected notes in account");
             Ok(NotePage::from_overshoot(out, limit))
         }
@@ -198,7 +191,6 @@ impl NotesApp {
                 search_notes_in_folders(
                     &folders_arr,
                     account_name,
-                    true,
                     &needle,
                     fields,
                     ceiling,
@@ -236,7 +228,7 @@ impl NotesApp {
                 self.new_object("note", &[(keys::name(), title), (keys::body(), content)])?;
 
             let collection = match folder {
-                None => app_notes(&self.sb_app),
+                None => obj_notes(&self.sb_app),
                 Some(name) => {
                     // Every account has a "Notes" folder; prefer the one in the
                     // account Notes itself would create the note in.
@@ -469,12 +461,13 @@ impl NotesApp {
             let mut found = None;
             self.for_each_account(|account, account_name| {
                 if found.is_none() {
-                    found = locate_note_in_folders(&obj_folders(account), &target, true).map(
-                        |location| FoundNote {
-                            location,
-                            account: account_name.to_owned(),
-                        },
-                    );
+                    found =
+                        locate_note_in_folders(&obj_folders(account), &target).map(|location| {
+                            FoundNote {
+                                location,
+                                account: account_name.to_owned(),
+                            }
+                        });
                 }
             });
             found

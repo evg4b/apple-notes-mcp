@@ -6,12 +6,9 @@ use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_foundation::NSString;
+use std::ops::ControlFlow;
 
 pub use objc2_scripting_bridge::SBApplication;
-
-pub(super) unsafe fn app_notes(app: &AnyObject) -> Retained<AnyObject> {
-    unsafe { sb_collection(app, objc2::sel!(notes)) }
-}
 
 pub(super) unsafe fn app_accounts(app: &SBApplication) -> Retained<AnyObject> {
     unsafe { sb_collection(app.as_ref(), objc2::sel!(accounts)) }
@@ -109,15 +106,16 @@ impl NoteLocation {
     }
 }
 
-/// Costs one batched title fetch per folder plus one name fetch per level.
-pub(super) unsafe fn locate_note_in_folders(
+/// Depth-first walk over a folder array and everything nested under it,
+/// skipping Recently Deleted. Folder names are batch-fetched once per level.
+unsafe fn walk_folders<B>(
     folders_arr: &AnyObject,
-    target: &NSString,
     top_level: bool,
-) -> Option<NoteLocation> {
+    visit: &mut impl FnMut(&AnyObject, String) -> ControlFlow<B>,
+) -> ControlFlow<B> {
     let count = unsafe { sb_count(folders_arr) };
     if count == 0 {
-        return None;
+        return ControlFlow::Continue(());
     }
     let mut names = unsafe { kvc_string_vec(folders_arr, keys::name()) };
     for i in 0..count {
@@ -126,40 +124,80 @@ pub(super) unsafe fn locate_note_in_folders(
             continue;
         }
         let folder = unsafe { sb_at(folders_arr, i) };
-        let notes_arr = unsafe { obj_notes(&folder) };
-        if let Some(index) = unsafe { kvc_index_of(&notes_arr, keys::name(), target) } {
-            return Some(NoteLocation {
-                notes: notes_arr,
-                index,
-                folder_name,
-            });
-        }
-        let sub_arr = unsafe { obj_folders(&folder) };
-        if let Some(found) = unsafe { locate_note_in_folders(&sub_arr, target, false) } {
-            return Some(found);
-        }
+        visit(&folder, folder_name)?;
+        unsafe { walk_folders(&obj_folders(&folder), false, visit) }?;
     }
-    None
+    ControlFlow::Continue(())
 }
 
-pub(super) unsafe fn collect_titles_in_folders(
+/// Costs one batched title fetch per folder plus one name fetch per level.
+pub(super) unsafe fn locate_note_in_folders(
     folders_arr: &AnyObject,
-    top_level: bool,
-    out: &mut Vec<String>,
-) {
-    let count = unsafe { sb_count(folders_arr) };
-    if count == 0 {
-        return;
-    }
-    let names = unsafe { kvc_string_vec(folders_arr, keys::name()) };
-    for i in 0..count {
-        if names.get(i).is_some_and(|name| is_trash(name, top_level)) {
-            continue;
+    target: &NSString,
+) -> Option<NoteLocation> {
+    let found = unsafe {
+        walk_folders(folders_arr, true, &mut |folder, folder_name| {
+            let notes = obj_notes(folder);
+            match kvc_index_of(&notes, keys::name(), target) {
+                Some(index) => ControlFlow::Break(NoteLocation {
+                    notes,
+                    index,
+                    folder_name,
+                }),
+                None => ControlFlow::Continue(()),
+            }
+        })
+    };
+    found.break_value()
+}
+
+pub(super) unsafe fn collect_titles_in_folders(folders_arr: &AnyObject, out: &mut Vec<String>) {
+    let _ = unsafe {
+        walk_folders::<()>(folders_arr, true, &mut |folder, _| {
+            out.extend(kvc_string_vec(&obj_notes(folder), keys::name()));
+            ControlFlow::Continue(())
+        })
+    };
+}
+
+/// Every per-note column but the title, one batched Apple Event each, so a
+/// folder of N notes costs a fixed number of Apple Events rather than N times
+/// as many.
+struct NoteColumns {
+    ids: Vec<String>,
+    bodies: Vec<String>,
+    created: Vec<String>,
+    modified: Vec<String>,
+    shared: Vec<bool>,
+    protected: Vec<bool>,
+}
+
+impl NoteColumns {
+    unsafe fn fetch(notes_arr: &AnyObject) -> Self {
+        unsafe {
+            Self {
+                ids: kvc_string_vec(notes_arr, keys::id()),
+                bodies: kvc_string_vec(notes_arr, keys::body()),
+                created: kvc_string_vec(notes_arr, keys::creation_date()),
+                modified: kvc_string_vec(notes_arr, keys::modification_date()),
+                shared: kvc_bool_vec(notes_arr, keys::shared()),
+                protected: kvc_bool_vec(notes_arr, keys::password_protected()),
+            }
         }
-        let folder = unsafe { sb_at(folders_arr, i) };
-        out.extend(unsafe { kvc_string_vec(&obj_notes(&folder), keys::name()) });
-        let sub_arr = unsafe { obj_folders(&folder) };
-        unsafe { collect_titles_in_folders(&sub_arr, false, out) };
+    }
+
+    fn take(&mut self, i: usize, title: String, folder: &str, account: &str) -> NoteInfo {
+        NoteInfo {
+            id: take_at(&mut self.ids, i),
+            title,
+            body: take_at(&mut self.bodies, i),
+            creation_date: take_at(&mut self.created, i),
+            modification_date: take_at(&mut self.modified, i),
+            folder: folder.to_owned(),
+            account: account.to_owned(),
+            shared: self.shared.get(i).copied().unwrap_or_default(),
+            password_protected: self.protected.get(i).copied().unwrap_or_default(),
+        }
     }
 }
 
@@ -170,66 +208,37 @@ pub(super) unsafe fn collect_notes_in_folder(
     ceiling: usize,
     out: &mut Vec<NoteInfo>,
 ) {
-    if out.len() >= ceiling {
+    let room = ceiling.saturating_sub(out.len());
+    if room == 0 {
         return;
     }
     let notes_arr = unsafe { obj_notes(folder) };
-    let count = unsafe { sb_count(&notes_arr) };
+    let count = unsafe { sb_count(&notes_arr) }.min(room);
     if count == 0 {
         return;
     }
-    let mut ids = unsafe { kvc_string_vec(&notes_arr, keys::id()) };
     let mut names = unsafe { kvc_string_vec(&notes_arr, keys::name()) };
-    let mut bodies = unsafe { kvc_string_vec(&notes_arr, keys::body()) };
-    let mut created = unsafe { kvc_string_vec(&notes_arr, keys::creation_date()) };
-    let mut modified = unsafe { kvc_string_vec(&notes_arr, keys::modification_date()) };
-    let shared = unsafe { kvc_bool_vec(&notes_arr, keys::shared()) };
-    let protected = unsafe { kvc_bool_vec(&notes_arr, keys::password_protected()) };
+    let mut columns = unsafe { NoteColumns::fetch(&notes_arr) };
 
-    out.reserve(count.min(ceiling - out.len()));
+    out.reserve(count);
     for i in 0..count {
-        if out.len() >= ceiling {
-            return;
-        }
-        out.push(NoteInfo {
-            id: take_at(&mut ids, i),
-            title: take_at(&mut names, i),
-            body: take_at(&mut bodies, i),
-            creation_date: take_at(&mut created, i),
-            modification_date: take_at(&mut modified, i),
-            folder: folder_name.to_owned(),
-            account: account_name.to_owned(),
-            shared: shared.get(i).copied().unwrap_or_default(),
-            password_protected: protected.get(i).copied().unwrap_or_default(),
-        });
+        let title = take_at(&mut names, i);
+        out.push(columns.take(i, title, folder_name, account_name));
     }
 }
 
 pub(super) unsafe fn collect_notes_in_folders(
     folders_arr: &AnyObject,
     account_name: &str,
-    top_level: bool,
     ceiling: usize,
     out: &mut Vec<NoteInfo>,
 ) {
-    let count = unsafe { sb_count(folders_arr) };
-    if count == 0 || out.len() >= ceiling {
-        return;
-    }
-    let mut names = unsafe { kvc_string_vec(folders_arr, keys::name()) };
-    for i in 0..count {
-        if out.len() >= ceiling {
-            return;
-        }
-        let folder_name = take_at(&mut names, i);
-        if is_trash(&folder_name, top_level) {
-            continue;
-        }
-        let folder = unsafe { sb_at(folders_arr, i) };
-        unsafe { collect_notes_in_folder(&folder, &folder_name, account_name, ceiling, out) };
-        let sub_arr = unsafe { obj_folders(&folder) };
-        unsafe { collect_notes_in_folders(&sub_arr, account_name, false, ceiling, out) };
-    }
+    let _ = unsafe {
+        walk_folders(folders_arr, true, &mut |folder, folder_name| {
+            collect_notes_in_folder(folder, &folder_name, account_name, ceiling, out);
+            stop_when_full(out, ceiling)
+        })
+    };
 }
 
 pub(super) unsafe fn collect_attachments(
@@ -275,42 +284,25 @@ pub(super) struct SearchFields {
 pub(super) unsafe fn search_notes_in_folders(
     folders_arr: &AnyObject,
     account_name: &str,
-    top_level: bool,
     query: &str,
     fields: SearchFields,
     limit: usize,
     out: &mut Vec<NoteInfo>,
 ) {
-    let count = unsafe { sb_count(folders_arr) };
-    if count == 0 {
-        return;
-    }
-    let mut folder_names = unsafe { kvc_string_vec(folders_arr, keys::name()) };
-    for i in 0..count {
-        if out.len() >= limit {
-            return;
-        }
-        let folder_name = take_at(&mut folder_names, i);
-        if is_trash(&folder_name, top_level) {
-            continue;
-        }
-        let folder = unsafe { sb_at(folders_arr, i) };
-        unsafe {
+    let _ = unsafe {
+        walk_folders(folders_arr, true, &mut |folder, folder_name| {
             search_notes_in_folder(
-                &folder,
+                folder,
                 &folder_name,
                 account_name,
                 query,
                 fields,
                 limit,
                 out,
-            )
-        };
-        let sub_arr = unsafe { obj_folders(&folder) };
-        unsafe {
-            search_notes_in_folders(&sub_arr, account_name, false, query, fields, limit, out)
-        };
-    }
+            );
+            stop_when_full(out, limit)
+        })
+    };
 }
 
 unsafe fn search_notes_in_folder(
@@ -348,25 +340,18 @@ unsafe fn search_notes_in_folder(
         return;
     }
 
-    let mut ids = unsafe { kvc_string_vec(&notes_arr, keys::id()) };
-    let mut bodies = unsafe { kvc_string_vec(&notes_arr, keys::body()) };
-    let mut created = unsafe { kvc_string_vec(&notes_arr, keys::creation_date()) };
-    let mut modified = unsafe { kvc_string_vec(&notes_arr, keys::modification_date()) };
-    let shared = unsafe { kvc_bool_vec(&notes_arr, keys::shared()) };
-    let protected = unsafe { kvc_bool_vec(&notes_arr, keys::password_protected()) };
-
+    let mut columns = unsafe { NoteColumns::fetch(&notes_arr) };
     out.reserve(matched.len());
     for i in matched {
-        out.push(NoteInfo {
-            id: take_at(&mut ids, i),
-            title: take_at(&mut names, i),
-            body: take_at(&mut bodies, i),
-            creation_date: take_at(&mut created, i),
-            modification_date: take_at(&mut modified, i),
-            folder: folder_name.to_owned(),
-            account: account_name.to_owned(),
-            shared: shared.get(i).copied().unwrap_or_default(),
-            password_protected: protected.get(i).copied().unwrap_or_default(),
-        });
+        let title = take_at(&mut names, i);
+        out.push(columns.take(i, title, folder_name, account_name));
+    }
+}
+
+fn stop_when_full<T>(out: &[T], ceiling: usize) -> ControlFlow<()> {
+    if out.len() >= ceiling {
+        ControlFlow::Break(())
+    } else {
+        ControlFlow::Continue(())
     }
 }
