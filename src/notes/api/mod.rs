@@ -117,6 +117,7 @@ impl NotesApp {
             if let Some(preferred) = prefer {
                 level.sort_by_key(|(_, account)| &**account != preferred);
             }
+            let mut top_level = true;
             while !level.is_empty() {
                 for (arr, account) in &level {
                     if let Some(index) = kvc_index_of(arr, keys::name(), &target) {
@@ -124,9 +125,11 @@ impl NotesApp {
                             parent: arr.clone(),
                             index,
                             account: Arc::clone(account),
+                            top_level,
                         });
                     }
                 }
+                top_level = false;
                 let mut next = Vec::new();
                 for (arr, account) in &level {
                     for i in 0..sb_count(arr) {
@@ -185,6 +188,7 @@ struct FoundFolder {
     parent: Retained<AnyObject>,
     index: usize,
     account: Arc<str>,
+    top_level: bool,
 }
 
 impl FoundFolder {

@@ -349,3 +349,31 @@ fn stop_when_full<T>(out: &[T], ceiling: usize) -> ControlFlow<()> {
         ControlFlow::Continue(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn top_level_recently_deleted_is_the_trash() {
+        assert!(is_trash("Recently Deleted", true));
+    }
+
+    #[test]
+    fn nested_recently_deleted_is_a_user_folder() {
+        assert!(!is_trash("Recently Deleted", false));
+    }
+
+    #[test]
+    fn trash_match_is_exact() {
+        assert!(!is_trash("recently deleted", true));
+        assert!(!is_trash("Recently Deleted ", true));
+        assert!(!is_trash("Notes", true));
+    }
+
+    #[test]
+    fn stop_when_full_breaks_at_the_ceiling() {
+        assert_eq!(stop_when_full(&[1, 2], 3), ControlFlow::Continue(()));
+        assert_eq!(stop_when_full(&[1, 2, 3], 3), ControlFlow::Break(()));
+    }
+}
