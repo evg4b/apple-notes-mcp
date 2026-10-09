@@ -3,9 +3,10 @@ mod read;
 mod write;
 
 use anyhow::{Result, anyhow, bail};
-use objc2::rc::Retained;
+use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2_foundation::NSString;
+use std::sync::{Mutex, PoisonError};
 use tracing::{info, trace, warn};
 
 use super::bridge::{
@@ -17,11 +18,13 @@ use super::helpers::{keys, kvc_get, kvc_index_of, kvc_string_vec, sb_at, sb_coun
 pub struct NotesApp {
     sb_app: Retained<SBApplication>,
     events: Retained<EventErrorDelegate>,
+    /// Held for the whole of every operation; see [`NotesApp::run`].
+    session: Mutex<()>,
 }
 
-// SAFETY: ScriptingBridge sends synchronous Apple Events, which macOS
-// serializes, so sharing one proxy across threads is safe in practice. The
-// delegate is only touched from inside those calls.
+// SAFETY: every use of `sb_app` and `events` after construction happens inside
+// `run`, which holds `session`, so neither is ever used from two threads at
+// once. Neither is tied to the thread that created it.
 unsafe impl Send for NotesApp {}
 unsafe impl Sync for NotesApp {}
 
@@ -39,7 +42,11 @@ impl NotesApp {
             .ok_or_else(|| anyhow!("Cannot connect to Apple Notes via ScriptingBridge"))?;
         let events = EventErrorDelegate::new();
         unsafe { sb_app.setDelegate(Some(ProtocolObject::from_ref(&*events))) };
-        let app = Self { sb_app, events };
+        let app = Self {
+            sb_app,
+            events,
+            session: Mutex::new(()),
+        };
 
         // A failed probe is not fatal: every tool call reports the same error
         // to the client, which is where the user will actually see it.
@@ -56,17 +63,27 @@ impl NotesApp {
         Ok(app)
     }
 
-    /// Run one operation against Notes. A failed Apple Event makes its call
-    /// return nil, which reads as "nothing there"; it is reported here instead,
-    /// so an error is never mistaken for an empty result.
+    /// Run one operation against Notes.
+    ///
+    /// Operations are serialized, which is what makes sharing `NotesApp`
+    /// across threads sound. Each one drains its own autorelease pool: the
+    /// calling threads have none, so the batch-fetched arrays of note bodies
+    /// would otherwise pile up until the thread exits.
+    ///
+    /// A failed Apple Event makes its call return nil, which reads as "nothing
+    /// there"; it is reported here instead, so an error is never mistaken for
+    /// an empty result.
     fn run<T>(&self, op: impl FnOnce() -> Result<T>) -> Result<T> {
-        self.events.take_error();
-        let result = op();
-        match (self.events.take_error(), result) {
-            (None, result) => result,
-            (Some(event), Ok(_)) => Err(anyhow!(event)),
-            (Some(event), Err(error)) => Err(anyhow!(event).context(error)),
-        }
+        let _session = self.session.lock().unwrap_or_else(PoisonError::into_inner);
+        autoreleasepool(|_| {
+            self.events.take_error();
+            let result = op();
+            match (self.events.take_error(), result) {
+                (None, result) => result,
+                (Some(event), Ok(_)) => Err(anyhow!(event)),
+                (Some(event), Err(error)) => Err(anyhow!(event).context(error)),
+            }
+        })
     }
 
     /// Walks folders instead of the application's flat `notes`, which includes
