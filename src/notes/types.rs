@@ -77,9 +77,11 @@ pub struct NotePage {
 }
 
 impl NotePage {
-    /// `notes` was collected up to `limit + 1`, so a full page can be told
+    /// `fill` is given a ceiling one past `limit`, so a full page can be told
     /// apart from an overflowing one.
-    pub(super) fn from_overshoot(mut notes: Vec<NoteInfo>, limit: usize) -> Self {
+    pub(super) fn collect(limit: usize, fill: impl FnOnce(usize, &mut Vec<NoteInfo>)) -> Self {
+        let mut notes = Vec::new();
+        fill(limit.saturating_add(1), &mut notes);
         let truncated = notes.len() > limit;
         notes.truncate(limit);
         Self { notes, truncated }
@@ -88,4 +90,57 @@ impl NotePage {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn note(title: &str) -> NoteInfo {
+        NoteInfo {
+            id: String::new(),
+            title: title.into(),
+            body: String::new(),
+            creation_date: String::new(),
+            modification_date: String::new(),
+            folder: String::new(),
+            account: String::new(),
+            shared: false,
+            password_protected: false,
+        }
+    }
+
+    fn page_of(limit: usize, available: usize) -> NotePage {
+        NotePage::collect(limit, |ceiling, out| {
+            out.extend((0..available.min(ceiling)).map(|i| note(&i.to_string())));
+        })
+    }
+
+    #[test]
+    fn collect_offers_one_slot_past_the_limit() {
+        NotePage::collect(3, |ceiling, _| assert_eq!(ceiling, 4));
+        NotePage::collect(usize::MAX, |ceiling, _| assert_eq!(ceiling, usize::MAX));
+    }
+
+    #[test]
+    fn collect_under_the_limit_is_not_truncated() {
+        let page = page_of(5, 3);
+        assert_eq!(page.notes.len(), 3);
+        assert!(!page.truncated);
+    }
+
+    #[test]
+    fn collect_exactly_at_the_limit_is_not_truncated() {
+        let page = page_of(3, 3);
+        assert_eq!(page.notes.len(), 3);
+        assert!(!page.truncated);
+    }
+
+    #[test]
+    fn collect_over_the_limit_is_cut_and_flagged() {
+        let page = page_of(3, 10);
+        let titles: Vec<_> = page.notes.iter().map(|n| n.title.as_str()).collect();
+        assert_eq!(titles, ["0", "1", "2"]);
+        assert!(page.truncated);
+    }
 }

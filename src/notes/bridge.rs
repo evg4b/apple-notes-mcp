@@ -2,7 +2,7 @@ use super::helpers::{
     contains_ignore_case, keys, kvc_bool, kvc_bool_vec, kvc_index_of, kvc_string, kvc_string_vec,
     sb_at, sb_collection, sb_count, take_at,
 };
-use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo};
+use super::types::{AttachmentInfo, FolderInfo, NoteInfo};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_foundation::NSString;
@@ -10,8 +10,8 @@ use std::ops::ControlFlow;
 
 pub use objc2_scripting_bridge::SBApplication;
 
-pub(super) unsafe fn app_accounts(app: &SBApplication) -> Retained<AnyObject> {
-    unsafe { sb_collection(app.as_ref(), objc2::sel!(accounts)) }
+pub(super) unsafe fn app_accounts(app: &AnyObject) -> Retained<AnyObject> {
+    unsafe { sb_collection(app, objc2::sel!(accounts)) }
 }
 
 pub(super) unsafe fn obj_notes(obj: &AnyObject) -> Retained<AnyObject> {
@@ -24,13 +24,6 @@ pub(super) unsafe fn obj_folders(obj: &AnyObject) -> Retained<AnyObject> {
 
 pub(super) unsafe fn obj_attachments(obj: &AnyObject) -> Retained<AnyObject> {
     unsafe { sb_collection(obj, objc2::sel!(attachments)) }
-}
-
-pub(super) unsafe fn account_info(obj: &AnyObject) -> AccountInfo {
-    AccountInfo {
-        id: unsafe { kvc_string(obj, keys::id()) },
-        name: unsafe { kvc_string(obj, keys::name()) },
-    }
 }
 
 /// Folder and account names come from the caller: walking back up the

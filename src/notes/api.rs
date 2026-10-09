@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
@@ -6,12 +6,13 @@ use objc2_foundation::{NSMutableDictionary, NSObject, NSString};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use super::bridge::{
-    NoteLocation, SBApplication, SearchFields, account_info, app_accounts, collect_attachments,
-    collect_folders, collect_notes_in_folder, collect_notes_in_folders, collect_titles_in_folders,
+    NoteLocation, SBApplication, SearchFields, app_accounts, collect_attachments, collect_folders,
+    collect_notes_in_folder, collect_notes_in_folders, collect_titles_in_folders,
     locate_note_in_folders, note_info, obj_folders, obj_notes, search_notes_in_folders,
 };
 use super::helpers::{
-    keys, kvc_bool, kvc_get, kvc_index_of, kvc_set, kvc_string, sb_at, sb_command, sb_count,
+    keys, kvc_bool, kvc_get, kvc_index_of, kvc_set, kvc_string, kvc_string_vec, sb_at, sb_command,
+    sb_count, take_at,
 };
 use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo, NotePage, PartialNoteInfo};
 
@@ -24,7 +25,7 @@ pub struct NotesApp {
 unsafe impl Send for NotesApp {}
 unsafe impl Sync for NotesApp {}
 
-static APPLE_NOTES_BUNDLE_ID: &str = "com.apple.Notes";
+const APPLE_NOTES_BUNDLE_ID: &str = "com.apple.Notes";
 
 impl NotesApp {
     pub fn connect() -> Result<Self> {
@@ -58,12 +59,17 @@ impl NotesApp {
     pub fn list_accounts(&self) -> Result<Vec<AccountInfo>> {
         unsafe {
             let arr = app_accounts(&self.sb_app);
-            let count = sb_count(&arr);
-            let mut out = Vec::with_capacity(count);
-            for i in 0..count {
-                out.push(account_info(&sb_at(&arr, i)));
-            }
-            debug!(count, "listed accounts");
+            let mut ids = kvc_string_vec(&arr, keys::id());
+            let names = kvc_string_vec(&arr, keys::name());
+            let out: Vec<_> = names
+                .into_iter()
+                .enumerate()
+                .map(|(i, name)| AccountInfo {
+                    id: take_at(&mut ids, i),
+                    name,
+                })
+                .collect();
+            debug!(count = out.len(), "listed accounts");
             Ok(out)
         }
     }
@@ -72,10 +78,14 @@ impl NotesApp {
     pub fn list_folders(&self) -> Result<Vec<FolderInfo>> {
         unsafe {
             let mut out = Vec::new();
-            self.for_each_account(|account, account_name| {
-                let folders_arr = obj_folders(account);
-                collect_folders(&folders_arr, account_name, account_name, &mut out);
-            });
+            for (account, account_name) in self.accounts() {
+                collect_folders(
+                    &obj_folders(&account),
+                    &account_name,
+                    &account_name,
+                    &mut out,
+                );
+            }
             debug!(total = out.len(), "listed folders");
             Ok(out)
         }
@@ -101,9 +111,9 @@ impl NotesApp {
     pub fn list_notes(&self) -> Result<Vec<String>> {
         unsafe {
             let mut names = Vec::new();
-            self.for_each_account(|account, _| {
-                collect_titles_in_folders(&obj_folders(account), &mut names);
-            });
+            for (account, _) in self.accounts() {
+                collect_titles_in_folders(&obj_folders(&account), &mut names);
+            }
             debug!(count = names.len(), "listed note titles");
             Ok(names)
         }
@@ -111,16 +121,16 @@ impl NotesApp {
 
     #[instrument(skip(self))]
     pub fn get_all_notes(&self, limit: usize) -> Result<NotePage> {
-        unsafe {
-            let ceiling = limit.saturating_add(1);
-            let mut out = Vec::new();
-            self.for_each_account(|account, account_name| {
-                let folders_arr = obj_folders(account);
-                collect_notes_in_folders(&folders_arr, account_name, ceiling, &mut out);
-            });
-            debug!(total = out.len(), "collected all notes");
-            Ok(NotePage::from_overshoot(out, limit))
-        }
+        let page = NotePage::collect(limit, |ceiling, out| unsafe {
+            for (account, account_name) in self.accounts() {
+                if out.len() >= ceiling {
+                    break;
+                }
+                collect_notes_in_folders(&obj_folders(&account), &account_name, ceiling, out);
+            }
+        });
+        debug!(total = page.notes.len(), "collected all notes");
+        Ok(page)
     }
 
     #[instrument(skip(self))]
@@ -140,66 +150,49 @@ impl NotesApp {
 
     #[instrument(skip(self))]
     pub fn get_notes_in_folder(&self, folder_name: &str, limit: usize) -> Result<NotePage> {
-        unsafe {
-            let ceiling = limit.saturating_add(1);
-            let mut out = Vec::new();
+        let page = NotePage::collect(limit, |ceiling, out| unsafe {
             if let Some(found) = self.find_folder(folder_name, None) {
-                let folder = found.folder();
-                collect_notes_in_folder(&folder, folder_name, &found.account, ceiling, &mut out);
+                collect_notes_in_folder(&found.folder(), folder_name, &found.account, ceiling, out);
             }
-            debug!(count = out.len(), "collected notes in folder");
-            Ok(NotePage::from_overshoot(out, limit))
-        }
+        });
+        debug!(count = page.notes.len(), "collected notes in folder");
+        Ok(page)
     }
 
     #[instrument(skip(self))]
     pub fn get_notes_in_account(&self, account_name: &str, limit: usize) -> Result<NotePage> {
-        unsafe {
-            let accounts_arr = app_accounts(&self.sb_app);
-            let target = NSString::from_str(account_name);
-            let Some(i) = kvc_index_of(&accounts_arr, keys::name(), &target) else {
-                debug!("account not found");
-                return Ok(NotePage::from_overshoot(Vec::new(), limit));
-            };
-            let account = sb_at(&accounts_arr, i);
-            let ceiling = limit.saturating_add(1);
-            let mut out = Vec::new();
-            collect_notes_in_folders(&obj_folders(&account), account_name, ceiling, &mut out);
-            debug!(count = out.len(), "collected notes in account");
-            Ok(NotePage::from_overshoot(out, limit))
-        }
+        let Some(account) = (unsafe { self.find_account(account_name) }) else {
+            debug!("account not found");
+            return Ok(NotePage::default());
+        };
+        let page = NotePage::collect(limit, |ceiling, out| unsafe {
+            collect_notes_in_folders(&obj_folders(&account), account_name, ceiling, out);
+        });
+        debug!(count = page.notes.len(), "collected notes in account");
+        Ok(page)
     }
 
     #[instrument(skip(self))]
     pub fn search_notes(&self, query: &str, in_body: bool, limit: usize) -> Result<NotePage> {
         if limit == 0 {
-            return Ok(NotePage::from_overshoot(Vec::new(), 0));
+            return Ok(NotePage::default());
         }
-        let ceiling = limit.saturating_add(1);
         let needle = query.to_lowercase();
         let fields = SearchFields {
             title: true,
             body: in_body,
         };
-        unsafe {
-            let mut out = Vec::new();
-            self.for_each_account(|account, account_name| {
+        let page = NotePage::collect(limit, |ceiling, out| unsafe {
+            for (account, account_name) in self.accounts() {
                 if out.len() >= ceiling {
-                    return;
+                    break;
                 }
-                let folders_arr = obj_folders(account);
-                search_notes_in_folders(
-                    &folders_arr,
-                    account_name,
-                    &needle,
-                    fields,
-                    ceiling,
-                    &mut out,
-                );
-            });
-            debug!(matches = out.len(), "search complete");
-            Ok(NotePage::from_overshoot(out, limit))
-        }
+                let folders_arr = obj_folders(&account);
+                search_notes_in_folders(&folders_arr, &account_name, &needle, fields, ceiling, out);
+            }
+        });
+        debug!(matches = page.notes.len(), "search complete");
+        Ok(page)
     }
 
     #[instrument(skip(self))]
@@ -325,7 +318,7 @@ impl NotesApp {
                 .find_folder(folder_name, Some(&found.account))
                 .ok_or_else(|| anyhow!("Folder {folder_name:?} not found"))?;
             if dest.account != found.account {
-                anyhow::bail!(
+                bail!(
                     "{title:?} is in account {:?} but folder {folder_name:?} is in {:?}; \
                      notes cannot be moved between accounts",
                     found.account,
@@ -358,17 +351,19 @@ impl NotesApp {
     #[instrument(skip(self))]
     pub fn create_folder(&self, name: &str, account: Option<&str>) -> Result<FolderInfo> {
         unsafe {
-            let account_obj = match account {
-                None => self.default_account()?,
-                Some(account_name) => {
-                    let accounts_arr = app_accounts(&self.sb_app);
-                    let target = NSString::from_str(account_name);
-                    let index = kvc_index_of(&accounts_arr, keys::name(), &target)
-                        .ok_or_else(|| anyhow!("Account {account_name:?} not found"))?;
-                    sb_at(&accounts_arr, index)
+            let (account_obj, account_name) = match account {
+                None => {
+                    let account = self.default_account()?;
+                    let name = kvc_string(&account, keys::name());
+                    (account, name)
+                }
+                Some(name) => {
+                    let account = self
+                        .find_account(name)
+                        .ok_or_else(|| anyhow!("Account {name:?} not found"))?;
+                    (account, name.to_owned())
                 }
             };
-            let account_name = kvc_string(&account_obj, keys::name());
 
             let folder = self.new_object("folder", &[(keys::name(), name)])?;
             let folders_arr = obj_folders(&account_obj);
@@ -444,7 +439,7 @@ impl NotesApp {
 
             let raw_alloc: *mut AnyObject = msg_send![&*cls, alloc];
             if raw_alloc.is_null() {
-                anyhow::bail!("Failed to allocate {class_name} object");
+                bail!("Failed to allocate {class_name} object");
             }
             let raw_init: *mut AnyObject = msg_send![raw_alloc, initWithProperties: &*props];
             Retained::from_raw(raw_init)
@@ -458,19 +453,12 @@ impl NotesApp {
     unsafe fn find_note(&self, title: &str) -> Option<FoundNote> {
         unsafe {
             let target = NSString::from_str(title);
-            let mut found = None;
-            self.for_each_account(|account, account_name| {
-                if found.is_none() {
-                    found =
-                        locate_note_in_folders(&obj_folders(account), &target).map(|location| {
-                            FoundNote {
-                                location,
-                                account: account_name.to_owned(),
-                            }
-                        });
-                }
-            });
-            found
+            self.accounts().find_map(|(account, account_name)| {
+                locate_note_in_folders(&obj_folders(&account), &target).map(|location| FoundNote {
+                    location,
+                    account: account_name,
+                })
+            })
         }
     }
 
@@ -483,10 +471,10 @@ impl NotesApp {
     unsafe fn find_folder(&self, folder_name: &str, prefer: Option<&str>) -> Option<FoundFolder> {
         unsafe {
             let target = NSString::from_str(folder_name);
-            let mut level: Vec<(Retained<AnyObject>, String)> = Vec::new();
-            self.for_each_account(|account, account_name| {
-                level.push((obj_folders(account), account_name.to_owned()));
-            });
+            let mut level: Vec<(Retained<AnyObject>, String)> = self
+                .accounts()
+                .map(|(account, account_name)| (obj_folders(&account), account_name))
+                .collect();
             if let Some(preferred) = prefer {
                 level.sort_by_key(|(_, account)| account != preferred);
             }
@@ -520,21 +508,30 @@ impl NotesApp {
             }
             let accounts_arr = app_accounts(&self.sb_app);
             if sb_count(&accounts_arr) == 0 {
-                anyhow::bail!("Notes reported no accounts — check Automation permission");
+                bail!("Notes reported no accounts — check Automation permission");
             }
             Ok(sb_at(&accounts_arr, 0))
         }
     }
 
-    unsafe fn for_each_account(&self, mut f: impl FnMut(&AnyObject, &str)) {
+    unsafe fn find_account(&self, name: &str) -> Option<Retained<AnyObject>> {
         unsafe {
             let accounts_arr = app_accounts(&self.sb_app);
-            for i in 0..sb_count(&accounts_arr) {
-                let account = sb_at(&accounts_arr, i);
-                let account_name = kvc_string(&account, keys::name());
-                f(&account, &account_name);
-            }
+            let index = kvc_index_of(&accounts_arr, keys::name(), &NSString::from_str(name))?;
+            Some(sb_at(&accounts_arr, index))
         }
+    }
+
+    /// Every account with its name. The names are batch-fetched in one Apple
+    /// Event; the accounts themselves are resolved lazily, so a caller that
+    /// stops early skips the rest.
+    unsafe fn accounts(&self) -> impl Iterator<Item = (Retained<AnyObject>, String)> {
+        let accounts_arr = unsafe { app_accounts(&self.sb_app) };
+        let mut names = unsafe { kvc_string_vec(&accounts_arr, keys::name()) };
+        (0..names.len()).map(move |i| {
+            let account = unsafe { sb_at(&accounts_arr, i) };
+            (account, take_at(&mut names, i))
+        })
     }
 }
 
@@ -561,7 +558,7 @@ impl FoundFolder {
 /// it with an empty one.
 unsafe fn ensure_unlocked(note: &AnyObject, title: &str) -> Result<()> {
     if unsafe { kvc_bool(note, keys::password_protected()) } {
-        anyhow::bail!("{title:?} is password-protected; unlock it in Notes to edit it");
+        bail!("{title:?} is password-protected; unlock it in Notes to edit it");
     }
     Ok(())
 }
