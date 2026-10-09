@@ -101,7 +101,11 @@ unsafe fn kvc_vec<T>(
     let Some(arr) = raw.downcast_ref::<NSArray<AnyObject>>() else {
         return Vec::new();
     };
-    arr.iter().map(|elem| convert(&elem)).collect()
+    // The array iterator does not report its length, so `collect` would grow
+    // the column by repeated reallocation.
+    let mut out = Vec::with_capacity(arr.count());
+    out.extend(arr.iter().map(|elem| convert(&elem)));
+    out
 }
 
 unsafe fn any_to_string(val: &AnyObject) -> String {
@@ -142,6 +146,12 @@ pub(super) unsafe fn sb_command(obj: &AnyObject, sel: Sel, arg: &AnyObject) {
 pub(super) fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
     if needle.is_empty() {
         return true;
+    }
+    if needle.is_ascii() && haystack.is_ascii() {
+        return haystack
+            .as_bytes()
+            .windows(needle.len())
+            .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()));
     }
     haystack
         .char_indices()
@@ -451,6 +461,13 @@ mod tests {
     #[test]
     fn contains_ignore_case_rejects_needle_in_empty_haystack() {
         assert!(!contains_ignore_case("", "a"));
+    }
+
+    #[test]
+    fn contains_ignore_case_ascii_needle_in_non_ascii_haystack() {
+        assert!(contains_ignore_case("Café MENU", "menu"));
+        assert!(contains_ignore_case("Заметка: TODO", "todo"));
+        assert!(!contains_ignore_case("Заметка", "todo"));
     }
 
     #[test]
