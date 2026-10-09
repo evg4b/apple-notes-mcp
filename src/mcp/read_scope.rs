@@ -14,8 +14,8 @@ use tracing::{info, warn};
 /// "Notes could not be read" distinct from "there is nothing there".
 fn read<T>(tool: &'static str, result: Result<T>) -> Result<T, String> {
     result.map_err(|error| {
-        warn!(tool, %error, "read failed");
-        error.to_string()
+        warn!(tool, error = format!("{error:#}"), "read failed");
+        format!("{error:#}")
     })
 }
 
@@ -39,136 +39,164 @@ impl AppleNotesMCP {
         description = "Titles of every note, no bodies. The cheapest way to see what \
                        exists; follow up with get_note."
     )]
-    pub fn list_notes(
+    pub async fn list_notes(
         &self,
         _: Parameters<EmptyRequest>,
     ) -> Result<Json<NoteTitlesResponse>, String> {
-        let titles = read("list_notes", self.app.list_notes())?;
-        listed("list_notes", titles.len(), NoteTitlesResponse { titles })
+        self.blocking(|app| {
+            let titles = read("list_notes", app.list_notes())?;
+            listed("list_notes", titles.len(), NoteTitlesResponse { titles })
+        })
+        .await?
     }
 
     #[tool(
         description = "One note by exact title, with its body. Returns null if nothing \
                        matches — search_notes first when unsure of the title."
     )]
-    pub fn get_note(
+    pub async fn get_note(
         &self,
         Parameters(req): Parameters<GetNoteRequest>,
     ) -> Result<Json<NoteResponse>, String> {
-        let note = read("get_note", self.app.get_note_by_title(&req.title))?;
-        info!(tool = "get_note", found = note.is_some(), "ok");
-        Ok(Json(NoteResponse::new(
-            note,
-            req.format.unwrap_or_default(),
-        )))
+        self.blocking(move |app| {
+            let note = read("get_note", app.get_note_by_title(&req.title))?;
+            info!(tool = "get_note", found = note.is_some(), "ok");
+            Ok(Json(NoteResponse::new(
+                note,
+                req.format.unwrap_or_default(),
+            )))
+        })
+        .await?
     }
 
     #[tool(
         description = "Notes whose title, or body unless in_body is false, contains the \
                        query. Case-insensitive. The right way to find notes by content."
     )]
-    pub fn search_notes(
+    pub async fn search_notes(
         &self,
         Parameters(req): Parameters<SearchRequest>,
     ) -> Result<Json<NotesResponse>, String> {
-        let page = read(
-            "search_notes",
-            self.app
-                .search_notes(&req.query, req.in_body(), req.body.limit()),
-        )?;
-        notes_ok("search_notes", NotesResponse::new(page, req.body.format()))
+        self.blocking(move |app| {
+            let page = read(
+                "search_notes",
+                app.search_notes(&req.query, req.in_body(), req.body.limit()),
+            )?;
+            notes_ok("search_notes", NotesResponse::new(page, req.body.format()))
+        })
+        .await?
     }
 
     #[tool(
         description = "Every note with its body, account by account. Expensive — use \
                        search_notes to find content and get_note for one known title."
     )]
-    pub fn get_all_notes(
+    pub async fn get_all_notes(
         &self,
         Parameters(req): Parameters<BulkNotesRequest>,
     ) -> Result<Json<NotesResponse>, String> {
-        let page = read("get_all_notes", self.app.get_all_notes(req.body.limit()))?;
-        notes_ok("get_all_notes", NotesResponse::new(page, req.body.format()))
+        self.blocking(move |app| {
+            let page = read("get_all_notes", app.get_all_notes(req.body.limit()))?;
+            notes_ok("get_all_notes", NotesResponse::new(page, req.body.format()))
+        })
+        .await?
     }
 
     #[tool(
         description = "Notes in one folder, nested or not, by exact name. Subfolders' \
                           notes are not included. See list_folders."
     )]
-    pub fn get_notes_in_folder(
+    pub async fn get_notes_in_folder(
         &self,
         Parameters(req): Parameters<FolderNotesRequest>,
     ) -> Result<Json<NotesResponse>, String> {
-        let page = read(
-            "get_notes_in_folder",
-            self.app.get_notes_in_folder(&req.folder, req.body.limit()),
-        )?;
-        notes_ok(
-            "get_notes_in_folder",
-            NotesResponse::new(page, req.body.format()),
-        )
+        self.blocking(move |app| {
+            let page = read(
+                "get_notes_in_folder",
+                app.get_notes_in_folder(&req.folder, req.body.limit()),
+            )?;
+            notes_ok(
+                "get_notes_in_folder",
+                NotesResponse::new(page, req.body.format()),
+            )
+        })
+        .await?
     }
 
     #[tool(description = "Notes in one account, by exact account name. See list_accounts.")]
-    pub fn get_notes_in_account(
+    pub async fn get_notes_in_account(
         &self,
         Parameters(req): Parameters<AccountNotesRequest>,
     ) -> Result<Json<NotesResponse>, String> {
-        let page = read(
-            "get_notes_in_account",
-            self.app
-                .get_notes_in_account(&req.account, req.body.limit()),
-        )?;
-        notes_ok(
-            "get_notes_in_account",
-            NotesResponse::new(page, req.body.format()),
-        )
+        self.blocking(move |app| {
+            let page = read(
+                "get_notes_in_account",
+                app.get_notes_in_account(&req.account, req.body.limit()),
+            )?;
+            notes_ok(
+                "get_notes_in_account",
+                NotesResponse::new(page, req.body.format()),
+            )
+        })
+        .await?
     }
 
     #[tool(description = "Files attached to a note, by exact title. Empty if it has none.")]
-    pub fn get_attachments(
+    pub async fn get_attachments(
         &self,
         Parameters(req): Parameters<TitleRequest>,
     ) -> Result<Json<AttachmentsResponse>, String> {
-        let attachments = read("get_attachments", self.app.get_note_attachments(&req.title))?;
-        listed(
-            "get_attachments",
-            attachments.len(),
-            AttachmentsResponse { attachments },
-        )
+        self.blocking(move |app| {
+            let attachments = read("get_attachments", app.get_note_attachments(&req.title))?;
+            listed(
+                "get_attachments",
+                attachments.len(),
+                AttachmentsResponse { attachments },
+            )
+        })
+        .await?
     }
 
     #[tool(
         description = "Every folder and subfolder, with its account and parent. Call \
                        before any tool that takes a folder name."
     )]
-    pub fn list_folders(
+    pub async fn list_folders(
         &self,
         _: Parameters<EmptyRequest>,
     ) -> Result<Json<FoldersResponse>, String> {
-        let folders = read("list_folders", self.app.list_folders())?;
-        listed("list_folders", folders.len(), FoldersResponse { folders })
+        self.blocking(|app| {
+            let folders = read("list_folders", app.list_folders())?;
+            listed("list_folders", folders.len(), FoldersResponse { folders })
+        })
+        .await?
     }
 
     #[tool(description = "Subfolders of one folder, nested ones included. Empty if none.")]
-    pub fn get_subfolders(
+    pub async fn get_subfolders(
         &self,
         Parameters(req): Parameters<FolderRequest>,
     ) -> Result<Json<FoldersResponse>, String> {
-        let folders = read("get_subfolders", self.app.get_subfolders(&req.folder))?;
-        listed("get_subfolders", folders.len(), FoldersResponse { folders })
+        self.blocking(move |app| {
+            let folders = read("get_subfolders", app.get_subfolders(&req.folder))?;
+            listed("get_subfolders", folders.len(), FoldersResponse { folders })
+        })
+        .await?
     }
 
     #[tool(description = "Configured accounts: iCloud, On My Mac, Exchange, and so on.")]
-    pub fn list_accounts(
+    pub async fn list_accounts(
         &self,
         _: Parameters<EmptyRequest>,
     ) -> Result<Json<AccountsResponse>, String> {
-        let accounts = read("list_accounts", self.app.list_accounts())?;
-        listed(
-            "list_accounts",
-            accounts.len(),
-            AccountsResponse { accounts },
-        )
+        self.blocking(|app| {
+            let accounts = read("list_accounts", app.list_accounts())?;
+            listed(
+                "list_accounts",
+                accounts.len(),
+                AccountsResponse { accounts },
+            )
+        })
+        .await?
     }
 }

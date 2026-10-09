@@ -2,7 +2,7 @@ use super::scope::ScopeSet;
 use crate::notes::NotesApp;
 use rmcp::handler::server::tool::ToolRouter;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, warn};
 
 #[derive(Clone)]
 pub struct AppleNotesMCP {
@@ -57,6 +57,21 @@ impl AppleNotesMCP {
         }
 
         router
+    }
+
+    /// Apple Events block until Notes answers, which can take seconds, so the
+    /// call runs on the blocking pool instead of holding a runtime worker.
+    pub(super) async fn blocking<T: Send + 'static>(
+        &self,
+        op: impl FnOnce(&NotesApp) -> T + Send + 'static,
+    ) -> Result<T, String> {
+        let app = Arc::clone(&self.app);
+        tokio::task::spawn_blocking(move || op(&app))
+            .await
+            .map_err(|error| {
+                warn!(%error, "tool call did not complete");
+                format!("Tool call did not complete: {error}")
+            })
     }
 }
 
