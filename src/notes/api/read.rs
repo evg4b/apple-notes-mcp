@@ -59,8 +59,7 @@ impl NotesApp {
         })
     }
 
-    /// Walked folder by folder rather than read off the application's flat
-    /// `notes`, which includes trashed notes: a title listed here must be one
+    /// Walks folders like `find_note` does, so every title listed here is one
     /// `get_note` can find.
     #[instrument(skip(self))]
     pub fn list_notes(&self) -> Result<Vec<String>> {

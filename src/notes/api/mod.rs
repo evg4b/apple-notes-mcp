@@ -66,13 +66,11 @@ impl NotesApp {
     /// Run one operation against Notes.
     ///
     /// Operations are serialized, which is what makes sharing `NotesApp`
-    /// across threads sound. Each one drains its own autorelease pool: the
-    /// calling threads have none, so the batch-fetched arrays of note bodies
-    /// would otherwise pile up until the thread exits.
+    /// across threads sound. Each drains its own autorelease pool, since the
+    /// calling threads have none and autoreleased note bodies would pile up.
     ///
-    /// A failed Apple Event makes its call return nil, which reads as "nothing
-    /// there"; it is reported here instead, so an error is never mistaken for
-    /// an empty result.
+    /// A failed Apple Event makes its call return nil, which would read as an
+    /// empty result, so it is turned into an error here.
     fn run<T>(&self, op: impl FnOnce() -> Result<T>) -> Result<T> {
         let _session = self.session.lock().unwrap_or_else(PoisonError::into_inner);
         autoreleasepool(|_| {
@@ -101,12 +99,9 @@ impl NotesApp {
         }
     }
 
-    /// Locate a folder by exact name, top-level or nested, in any account.
-    ///
-    /// The search goes breadth-first across all accounts, so a top-level folder
-    /// wins over a nested one of the same name. `prefer` puts one account's
-    /// folders ahead of the rest at every depth. Each level costs one batched
-    /// name fetch per folder array, plus one count per folder to descend.
+    /// Breadth-first across all accounts, so a top-level folder wins over a
+    /// nested one with the same name. `prefer` puts one account's folders
+    /// ahead of the rest at every depth.
     unsafe fn find_folder(&self, folder_name: &str, prefer: Option<&str>) -> Option<FoundFolder> {
         unsafe {
             let target = NSString::from_str(folder_name);

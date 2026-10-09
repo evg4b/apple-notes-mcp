@@ -14,9 +14,9 @@ pub(super) struct EventErrors {
 
 define_class!(
     /// Without a delegate, `SBApplication` raises an Objective-C exception for
-    /// every failed Apple Event, and an exception cannot unwind through Rust
-    /// frames: the process aborts. This one records the failure instead and
-    /// lets the call return nil, so the operation can report it as an error.
+    /// every failed Apple Event, and the exception aborts the process because
+    /// it cannot unwind through Rust. This delegate records the failure and
+    /// lets the call return nil.
     #[unsafe(super(NSObject))]
     #[name = "AppleNotesMCPEventErrorDelegate"]
     #[ivars = EventErrors]
@@ -62,8 +62,8 @@ fn describe(error: &NSError) -> String {
     describe_code(error.code(), &message)
 }
 
-/// The OSStatus codes a Notes call realistically hits, with what to do about
-/// them; the raw messages for these are generic.
+/// Hints for the OSStatus codes Notes calls commonly hit, whose raw messages
+/// are generic.
 fn describe_code(code: isize, message: &str) -> String {
     let hint = match code {
         -1743 => Some(

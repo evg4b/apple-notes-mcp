@@ -219,8 +219,8 @@ fn decode_entity(body: &str) -> Option<char> {
 mod tests {
     use super::*;
 
-    /// The two-pass conversion this module used before tidying moved into
-    /// `PlainText`: build the raw text, then tidy it into a second buffer.
+    /// Reference implementation: build the raw text, then tidy it into a second
+    /// buffer.
     fn two_pass(html: &str) -> String {
         let mut raw = String::new();
         let mut rest = html;

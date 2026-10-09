@@ -64,9 +64,8 @@ pub(super) unsafe fn sb_at(arr: &AnyObject, index: usize) -> Retained<AnyObject>
     unsafe { msg_send![arr, objectAtIndex: index] }
 }
 
-/// `valueForKey:` on the *collection* (rather than on each element) is
-/// translated by ScriptingBridge into a single "get every element's `key`"
-/// Apple Event returning a plain `NSArray`. Cost: 1 Apple Event instead of N.
+/// `valueForKey:` on a *collection* becomes a single "get every element's
+/// `key`" Apple Event that returns a plain `NSArray`.
 pub(super) unsafe fn kvc_string_vec(collection: &AnyObject, key: &NSString) -> Vec<String> {
     unsafe { kvc_vec(collection, key, |elem| any_to_string(elem)) }
 }
@@ -101,8 +100,8 @@ unsafe fn kvc_vec<T>(
     let Some(arr) = raw.downcast_ref::<NSArray<AnyObject>>() else {
         return Vec::new();
     };
-    // The array iterator does not report its length, so `collect` would grow
-    // the column by repeated reallocation.
+    // The array iterator does not report its length, so `collect` would
+    // reallocate as the column grows.
     let mut out = Vec::with_capacity(arr.count());
     out.extend(arr.iter().map(|elem| convert(&elem)));
     out

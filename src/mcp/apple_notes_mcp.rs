@@ -59,8 +59,8 @@ impl AppleNotesMCP {
         router
     }
 
-    /// Apple Events block until Notes answers, which can take seconds, so the
-    /// call runs on the blocking pool instead of holding a runtime worker.
+    /// Apple Events block until Notes answers, sometimes for seconds, so the
+    /// call runs on the blocking pool.
     pub(super) async fn blocking<T: Send + 'static>(
         &self,
         op: impl FnOnce(&NotesApp) -> T + Send + 'static,

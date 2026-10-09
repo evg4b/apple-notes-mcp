@@ -6,8 +6,8 @@
 //! They require Notes.app to be installed and the test binary to hold the
 //! Automation permission for it. The write tests create and then remove notes
 //! and folders prefixed with `__apple_notes_mcp_test`. Deleted test notes land
-//! in Recently Deleted, which this server deliberately never touches, so they
-//! stay there until Notes purges them.
+//! in Recently Deleted, which this server never touches, so they stay there
+//! until Notes purges them.
 
 use super::api::NotesApp;
 

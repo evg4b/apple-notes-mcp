@@ -5,8 +5,8 @@ use objc2::msg_send;
 use tracing::{debug, instrument};
 
 impl NotesApp {
-    /// Recently Deleted itself is refused: removing it would erase every note
-    /// in it for good, which no other tool can do.
+    /// Refuses Recently Deleted itself: removing it would erase every trashed
+    /// note for good.
     #[instrument(skip(self))]
     pub fn delete_folder(&self, name: &str) -> Result<bool> {
         self.run(|| unsafe {
@@ -23,9 +23,9 @@ impl NotesApp {
         })
     }
 
-    /// Delete a note. Notes moves it to Recently Deleted in accounts that
-    /// have one; notes already there are never matched, so this cannot erase
-    /// one for good.
+    /// Notes moves the note to Recently Deleted in accounts that have one.
+    /// Notes already there are never matched, so this cannot erase one for
+    /// good.
     #[instrument(skip(self))]
     pub fn delete_note(&self, title: &str) -> Result<bool> {
         self.run(|| unsafe {

@@ -9,9 +9,9 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{Json, tool};
 use tracing::{info, warn};
 
-/// An empty payload would tell the client "nothing matched", and it would act
-/// on that — offer to create a note that already exists, say. An error keeps
-/// "Notes could not be read" distinct from "there is nothing there".
+/// A failed read must be an error: an empty payload reads as "nothing matched",
+/// and the client acts on it, for example by creating a note that already
+/// exists.
 fn read<T>(tool: &'static str, result: Result<T>) -> Result<T, String> {
     result.map_err(|error| {
         warn!(tool, error = format!("{error:#}"), "read failed");

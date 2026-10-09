@@ -43,9 +43,8 @@ pub(super) unsafe fn note_info(obj: &AnyObject, folder_name: &str, account_name:
     }
 }
 
-/// `id` and `name` are batch-fetched for the whole level (2 Apple Events per
-/// level instead of 2 per folder); recursion still costs one `sb_at` plus one
-/// `folders` fetch per folder.
+/// `id` and `name` are batch-fetched once per level; descending still costs
+/// one `folders` fetch per folder.
 pub(super) unsafe fn collect_folders(
     folders_arr: &AnyObject,
     account_name: &Arc<str>,
@@ -154,9 +153,8 @@ pub(super) unsafe fn collect_titles_in_folders(folders_arr: &AnyObject, out: &mu
     };
 }
 
-/// Every per-note column but the title, one batched Apple Event each, so a
-/// folder of N notes costs a fixed number of Apple Events rather than N times
-/// as many.
+/// Every per-note column except the title, each fetched for the whole folder
+/// in one Apple Event.
 struct NoteColumns {
     ids: Vec<String>,
     bodies: Vec<String>,
@@ -270,11 +268,9 @@ pub(super) struct SearchFields {
     pub body: bool,
 }
 
-/// Titles (and plain-text bodies, when searched) are batch-fetched per folder.
-/// Bodies are matched on Notes' own `plaintext`, not the HTML, so a query such
-/// as "div" or "&" does not hit every note through its markup. The remaining
-/// columns are only fetched for folders that actually contain a match, so
-/// scanning a large library costs one or two Apple Events per folder.
+/// Bodies are matched on Notes' own `plaintext`, so a query such as "div" or
+/// "&" does not hit every note through its markup. Titles and plain text are
+/// batch-fetched per folder; the other columns only for folders with a match.
 pub(super) unsafe fn search_notes_in_folders(
     folders_arr: &AnyObject,
     account_name: &Arc<str>,

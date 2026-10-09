@@ -7,7 +7,7 @@ pub enum Scope {
     Delete,
 }
 
-/// Bit set of [`Scope`]s, so scope checks are a mask test instead of a `Vec` scan.
+/// Bit set of [`Scope`]s.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ScopeSet(u8);
 
