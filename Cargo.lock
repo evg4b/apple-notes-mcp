@@ -83,6 +83,7 @@ dependencies = [
  "anyhow",
  "clap",
  "objc2",
+ "objc2-core-services",
  "objc2-foundation",
  "objc2-scripting-bridge",
  "rmcp",

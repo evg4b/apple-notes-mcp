@@ -17,7 +17,7 @@ impl NotesApp {
         content: &str,
         folder: Option<&str>,
     ) -> Result<PartialNoteInfo> {
-        unsafe {
+        self.run(|| unsafe {
             let note =
                 self.new_object("note", &[(keys::name(), title), (keys::body(), content)])?;
 
@@ -46,7 +46,7 @@ impl NotesApp {
                 creation_date: Some(kvc_string(&resolved, keys::creation_date())),
                 modification_date: Some(kvc_string(&resolved, keys::modification_date())),
             })
-        }
+        })
     }
 
     #[instrument(skip(self, content))]
@@ -56,7 +56,7 @@ impl NotesApp {
         new_title: Option<&str>,
         content: Option<&str>,
     ) -> Result<Option<PartialNoteInfo>> {
-        unsafe {
+        self.run(|| unsafe {
             let Some(found) = self.find_note(title) else {
                 debug!("note not found");
                 return Ok(None);
@@ -78,12 +78,12 @@ impl NotesApp {
                 creation_date: None,
                 modification_date: Some(kvc_string(&note, keys::modification_date())),
             }))
-        }
+        })
     }
 
     #[instrument(skip(self, content))]
     pub fn append_to_note(&self, title: &str, content: &str) -> Result<Option<PartialNoteInfo>> {
-        unsafe {
+        self.run(|| unsafe {
             let Some(found) = self.find_note(title) else {
                 debug!("note not found");
                 return Ok(None);
@@ -102,7 +102,7 @@ impl NotesApp {
                 creation_date: None,
                 modification_date: Some(kvc_string(&note, keys::modification_date())),
             }))
-        }
+        })
     }
 
     /// Moves across accounts are refused: Notes carries them out by trashing
@@ -110,7 +110,7 @@ impl NotesApp {
     /// not reliably there.
     #[instrument(skip(self))]
     pub fn move_note(&self, title: &str, folder_name: &str) -> Result<Option<PartialNoteInfo>> {
-        unsafe {
+        self.run(|| unsafe {
             let Some(found) = self.find_note(title) else {
                 debug!("note not found");
                 return Ok(None);
@@ -146,12 +146,12 @@ impl NotesApp {
                 creation_date: None,
                 modification_date: Some(kvc_string(&moved, keys::modification_date())),
             }))
-        }
+        })
     }
 
     #[instrument(skip(self))]
     pub fn create_folder(&self, name: &str, account: Option<&str>) -> Result<FolderInfo> {
-        unsafe {
+        self.run(|| unsafe {
             let (account_obj, account_name) = match account {
                 None => {
                     let account = self.default_account()?;
@@ -182,7 +182,7 @@ impl NotesApp {
                 parent: account_name.clone(),
                 account: account_name,
             })
-        }
+        })
     }
 
     /// `initWithProperties:` carries the fields in the creation Apple Event,

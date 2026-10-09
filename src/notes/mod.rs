@@ -1,5 +1,6 @@
 mod api;
 mod bridge;
+mod delegate;
 mod helpers;
 mod html;
 mod types;

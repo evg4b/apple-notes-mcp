@@ -6,7 +6,7 @@ use tracing::{debug, instrument};
 impl NotesApp {
     #[instrument(skip(self))]
     pub fn delete_folder(&self, name: &str) -> Result<bool> {
-        unsafe {
+        self.run(|| unsafe {
             let Some(found) = self.find_folder(name, None) else {
                 debug!("folder not found");
                 return Ok(false);
@@ -14,7 +14,7 @@ impl NotesApp {
             let _: () = msg_send![&*found.parent, removeObjectAtIndex: found.index];
             debug!("folder deleted");
             Ok(true)
-        }
+        })
     }
 
     /// Delete a note. Notes moves it to Recently Deleted in accounts that
@@ -22,7 +22,7 @@ impl NotesApp {
     /// one for good.
     #[instrument(skip(self))]
     pub fn delete_note(&self, title: &str) -> Result<bool> {
-        unsafe {
+        self.run(|| unsafe {
             let Some(found) = self.find_note(title) else {
                 debug!("note not found");
                 return Ok(false);
@@ -33,6 +33,6 @@ impl NotesApp {
             let _: () = msg_send![&*location.notes, removeObjectAtIndex: location.index];
             debug!("note deleted");
             Ok(true)
-        }
+        })
     }
 }

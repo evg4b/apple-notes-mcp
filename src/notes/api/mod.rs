@@ -4,21 +4,24 @@ mod write;
 
 use anyhow::{Result, anyhow, bail};
 use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
+use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2_foundation::NSString;
-use tracing::{error, info, trace, warn};
+use tracing::{info, trace, warn};
 
 use super::bridge::{
     NoteLocation, SBApplication, app_accounts, locate_note_in_folders, obj_folders,
 };
+use super::delegate::EventErrorDelegate;
 use super::helpers::{keys, kvc_get, kvc_index_of, kvc_string_vec, sb_at, sb_count, take_at};
 
 pub struct NotesApp {
     sb_app: Retained<SBApplication>,
+    events: Retained<EventErrorDelegate>,
 }
 
 // SAFETY: ScriptingBridge sends synchronous Apple Events, which macOS
-// serializes, so sharing one proxy across threads is safe in practice.
+// serializes, so sharing one proxy across threads is safe in practice. The
+// delegate is only touched from inside those calls.
 unsafe impl Send for NotesApp {}
 unsafe impl Sync for NotesApp {}
 
@@ -34,8 +37,12 @@ impl NotesApp {
 
         let sb_app = unsafe { SBApplication::applicationWithBundleIdentifier(&bundle_id) }
             .ok_or_else(|| anyhow!("Cannot connect to Apple Notes via ScriptingBridge"))?;
-        let app = Self { sb_app };
+        let events = EventErrorDelegate::new();
+        unsafe { sb_app.setDelegate(Some(ProtocolObject::from_ref(&*events))) };
+        let app = Self { sb_app, events };
 
+        // A failed probe is not fatal: every tool call reports the same error
+        // to the client, which is where the user will actually see it.
         match app.list_accounts() {
             Ok(accounts) if accounts.is_empty() => warn!(
                 "Notes returned 0 accounts — Automation permission is probably missing. \
@@ -43,13 +50,23 @@ impl NotesApp {
                  this binary to control Notes.app, then restart."
             ),
             Ok(accounts) => info!(accounts = accounts.len(), "Notes.app connected"),
-            Err(e) => {
-                error!(error = %e, "Notes.app probe failed — check Automation permission");
-                return Err(e);
-            }
+            Err(error) => warn!(error = format!("{error:#}"), "Notes.app probe failed"),
         }
 
         Ok(app)
+    }
+
+    /// Run one operation against Notes. A failed Apple Event makes its call
+    /// return nil, which reads as "nothing there"; it is reported here instead,
+    /// so an error is never mistaken for an empty result.
+    fn run<T>(&self, op: impl FnOnce() -> Result<T>) -> Result<T> {
+        self.events.take_error();
+        let result = op();
+        match (self.events.take_error(), result) {
+            (None, result) => result,
+            (Some(event), Ok(_)) => Err(anyhow!(event)),
+            (Some(event), Err(error)) => Err(anyhow!(event).context(error)),
+        }
     }
 
     /// Walks folders instead of the application's flat `notes`, which includes
