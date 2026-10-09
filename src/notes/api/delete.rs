@@ -5,8 +5,7 @@ use objc2::msg_send;
 use tracing::{debug, instrument};
 
 impl NotesApp {
-    /// Refuses Recently Deleted itself: removing it would erase every trashed
-    /// note for good.
+    /// Refuses Recently Deleted: removing it would erase every trashed note.
     #[instrument(skip(self))]
     pub fn delete_folder(&self, name: &str) -> Result<bool> {
         self.run(|| unsafe {
@@ -23,9 +22,8 @@ impl NotesApp {
         })
     }
 
-    /// Notes moves the note to Recently Deleted in accounts that have one.
-    /// Notes already there are never matched, so this cannot erase one for
-    /// good.
+    /// Accounts with Recently Deleted move the note there. Trashed notes are
+    /// never matched, so none is erased for good.
     #[instrument(skip(self))]
     pub fn delete_note(&self, title: &str) -> Result<bool> {
         self.run(|| unsafe {
@@ -33,8 +31,8 @@ impl NotesApp {
                 debug!("note not found");
                 return Ok(false);
             };
-            // SBObject resolves `delete` dynamically; removing the element from
-            // its parent collection is the supported ScriptingBridge spelling.
+            // SBObject has no static `delete`; removing the element from its
+            // collection is the ScriptingBridge way.
             let location = found.location;
             let _: () = msg_send![&*location.notes, removeObjectAtIndex: location.index];
             debug!("note deleted");

@@ -59,8 +59,7 @@ impl AppleNotesMCP {
         router
     }
 
-    /// Apple Events block until Notes answers, sometimes for seconds, so the
-    /// call runs on the blocking pool.
+    /// Apple Events block, so Notes calls run on the blocking pool.
     pub(super) async fn blocking<T: Send + 'static>(
         &self,
         op: impl FnOnce(&NotesApp) -> T + Send + 'static,
@@ -220,7 +219,7 @@ mod tests {
         }
     }
 
-    /// Clients keep the tool list in context, so its size is a standing cost.
+    /// Clients keep the tool list in context, so its size costs every session.
     #[test]
     fn tool_list_fits_the_budget() {
         const BUDGET_BYTES: usize = 23_000;

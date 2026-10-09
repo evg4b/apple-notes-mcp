@@ -5,11 +5,10 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[clap(author, version, about)]
 pub(crate) struct Args {
-    /// Tool groups to enable. Comma-separated; repeatable.
+    /// Tool groups to enable, comma-separated.
     #[clap(long, value_enum, value_delimiter = ',', default_value = "read")]
     pub(crate) scopes: Vec<Scope>,
-    /// Path to the log file. Defaults to
-    /// ~/Library/Logs/apple-notes-mcp/apple-notes-mcp.log
+    /// Log file. Defaults to ~/Library/Logs/apple-notes-mcp/apple-notes-mcp.log
     #[clap(long)]
     pub(crate) log_file: Option<PathBuf>,
     /// Log verbosity. Defaults to ERROR.

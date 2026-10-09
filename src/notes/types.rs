@@ -3,12 +3,9 @@ use rmcp::schemars::JsonSchema;
 use rmcp::serde::Serialize;
 use std::sync::Arc;
 
-// Every doc comment here is copied into the `outputSchema` of each tool that
-// returns the type, so it is paid for on every session. Explanations belong in
-// docs/tools.md.
-//
-// Names repeated across rows (folder, account, parent, note title) are
-// `Arc<str>`, so a folder of N notes shares one copy instead of making N.
+// Doc comments here are copied into every tool's `outputSchema`; keep them
+// short and explain in docs/tools.md. Names repeated across rows are
+// `Arc<str>`, shared rather than copied.
 
 /// An account, e.g. "iCloud" or "On My Mac".
 #[derive(Debug, Serialize, JsonSchema)]
@@ -17,22 +14,22 @@ pub struct AccountInfo {
     pub name: String,
 }
 
-/// A folder, nested either in another folder or directly in an account.
+/// A folder, in an account or in another folder.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct FolderInfo {
     pub id: String,
     pub name: Arc<str>,
     pub account: Arc<str>,
-    /// Immediate container: an account name for top-level folders, else a folder name.
+    /// Account name for top-level folders, else the parent folder's name.
     pub parent: Arc<str>,
 }
 
-/// A note with its full body.
+/// A note with its body.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct NoteInfo {
     pub id: String,
     pub title: String,
-    /// Plain text, or HTML when the request asked for `format: "html"`.
+    /// Plain text, or HTML with `format: "html"`.
     pub body: String,
     pub creation_date: String,
     pub modification_date: String,
@@ -41,13 +38,13 @@ pub struct NoteInfo {
     /// Omitted when false.
     #[serde(skip_serializing_if = "is_false")]
     pub shared: bool,
-    /// Omitted when false. A protected note always reports an empty body.
+    /// Omitted when false. Protected notes report an empty body.
     #[serde(skip_serializing_if = "is_false")]
     pub password_protected: bool,
 }
 
-/// What a write already knows about the note it touched, returned instead of
-/// re-reading it. Every field but `id` varies by operation.
+/// What a write knows about the note, so it need not be re-read. Only `id` is
+/// always set.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct PartialNoteInfo {
     pub id: String,
@@ -73,7 +70,7 @@ pub struct AttachmentInfo {
     pub note_title: Arc<str>,
 }
 
-/// A bounded batch of notes, plus whether the bound cut anything off.
+/// A capped batch of notes and whether the cap cut any off.
 #[derive(Default)]
 pub struct NotePage {
     pub notes: Vec<NoteInfo>,
@@ -81,8 +78,8 @@ pub struct NotePage {
 }
 
 impl NotePage {
-    /// `fill` is given a ceiling one past `limit`, so a full page can be told
-    /// apart from an overflowing one.
+    /// `fill` gets a ceiling of `limit + 1`, so a full page differs from an
+    /// overflowing one.
     pub(super) fn collect(limit: usize, fill: impl FnOnce(usize, &mut Vec<NoteInfo>)) -> Self {
         let mut notes = Vec::new();
         fill(limit.saturating_add(1), &mut notes);

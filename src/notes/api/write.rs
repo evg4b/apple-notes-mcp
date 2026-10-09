@@ -25,8 +25,8 @@ impl NotesApp {
             let collection = match folder {
                 None => obj_notes(&self.sb_app),
                 Some(name) => {
-                    // Every account has a "Notes" folder; prefer the one in the
-                    // account Notes itself would create the note in.
+                    // Every account has a "Notes" folder; prefer the default
+                    // account's.
                     let default_account = kvc_string(&*self.default_account()?, keys::name());
                     let found = self
                         .find_folder(name, Some(&default_account))
@@ -37,8 +37,8 @@ impl NotesApp {
             let _: () = msg_send![&*collection, insertObject: &*note, atIndex: 0usize];
             debug!("note created");
 
-            // The freshly inserted proxy is unresolved; read the stored note back
-            // out of the collection to get its assigned id and dates.
+            // The inserted proxy is unresolved; read the stored note back for
+            // its id and dates.
             let resolved = sb_at(&collection, 0);
             Ok(PartialNoteInfo {
                 id: kvc_string(&resolved, keys::id()),
@@ -106,9 +106,8 @@ impl NotesApp {
         })
     }
 
-    /// Moves across accounts are refused: Notes carries them out by trashing
-    /// the original, and the copy it is meant to leave in the destination is
-    /// not reliably there.
+    /// Refuses cross-account moves: Notes trashes the original and does not
+    /// reliably create the copy.
     #[instrument(skip(self))]
     pub fn move_note(&self, title: &str, folder_name: &str) -> Result<Option<PartialNoteInfo>> {
         self.run(|| unsafe {
@@ -132,7 +131,7 @@ impl NotesApp {
             let id = NSString::from_str(&kvc_string(&note, keys::id()));
             sb_command(&note, objc2::sel!(moveTo:), &folder);
 
-            // `move` returns nothing, so confirm it by finding the note in its
+            // `move` returns nothing; confirm by finding the note in its
             // destination.
             let dest_notes = obj_notes(&folder);
             let index = kvc_index_of(&dest_notes, keys::id(), &id)
@@ -172,7 +171,7 @@ impl NotesApp {
             let _: () = msg_send![&*folders_arr, insertObject: &*folder, atIndex: 0usize];
             debug!("folder created");
 
-            // Folders are not kept in insertion order, so find the new one by name.
+            // Folders are not in insertion order; find the new one by name.
             let target = NSString::from_str(name);
             let index = kvc_index_of(&folders_arr, keys::name(), &target)
                 .ok_or_else(|| anyhow!("Notes did not create folder {name:?}"))?;
@@ -186,8 +185,8 @@ impl NotesApp {
         })
     }
 
-    /// `initWithProperties:` carries the fields in the creation Apple Event,
-    /// which is more reliable than setting them via KVC after insertion.
+    /// `initWithProperties:` sends the fields in the creation Apple Event,
+    /// which is more reliable than setting them afterwards.
     unsafe fn new_object(
         &self,
         class_name: &str,
@@ -218,8 +217,7 @@ impl NotesApp {
     }
 }
 
-/// Notes hides a locked note's body from scripts, so an edit would overwrite
-/// it with an empty one.
+/// Scripts see a locked note's body as empty, so an edit would wipe it.
 unsafe fn ensure_unlocked(note: &AnyObject, title: &str) -> Result<()> {
     if unsafe { kvc_bool(note, keys::password_protected()) } {
         bail!("{title:?} is password-protected; unlock it in Notes to edit it");

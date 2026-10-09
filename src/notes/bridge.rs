@@ -27,8 +27,8 @@ pub(super) unsafe fn obj_attachments(obj: &AnyObject) -> Retained<AnyObject> {
     unsafe { sb_collection(obj, objc2::sel!(attachments)) }
 }
 
-/// Folder and account names come from the caller: walking back up the
-/// containment chain would cost extra Apple Events per note.
+/// Names come from the caller: walking up the containment chain costs Apple
+/// Events.
 pub(super) unsafe fn note_info(obj: &AnyObject, folder_name: &str, account_name: &str) -> NoteInfo {
     NoteInfo {
         id: unsafe { kvc_string(obj, keys::id()) },
@@ -43,8 +43,7 @@ pub(super) unsafe fn note_info(obj: &AnyObject, folder_name: &str, account_name:
     }
 }
 
-/// `id` and `name` are batch-fetched once per level; descending still costs
-/// one `folders` fetch per folder.
+/// Batch-fetches `id` and `name` once per level.
 pub(super) unsafe fn collect_folders(
     folders_arr: &AnyObject,
     account_name: &Arc<str>,
@@ -73,16 +72,13 @@ pub(super) unsafe fn collect_folders(
     }
 }
 
-/// Name of the top-level folder that iCloud accounts keep deleted notes in.
-///
-/// Notes exposes it as an ordinary folder, and its notes as ordinary notes, so
-/// without this check a title lookup can land on a trashed copy, and deleting
-/// that copy is permanent. The scripting dictionary has no property that marks
-/// the folder, so it is recognised by name; Notes reports it in English.
+/// Top-level folder where iCloud keeps deleted notes. Notes exposes it as an
+/// ordinary folder, so lookups skip it: a match there is a trashed copy, and
+/// deleting that is permanent. Nothing in the scripting dictionary marks it, so
+/// it is matched by name, which Notes reports in English.
 const RECENTLY_DELETED: &str = "Recently Deleted";
 
-/// Only a top-level folder can be the trash; a nested user folder with the same
-/// name is left alone.
+/// Only a top-level folder can be the trash.
 pub(super) fn is_trash(name: &str, top_level: bool) -> bool {
     top_level && name == RECENTLY_DELETED
 }
@@ -99,8 +95,7 @@ impl NoteLocation {
     }
 }
 
-/// Depth-first walk over a folder array and everything nested under it,
-/// skipping Recently Deleted. Folder names are batch-fetched once per level.
+/// Depth-first walk of a folder tree, skipping Recently Deleted.
 unsafe fn walk_folders<B>(
     folders_arr: &AnyObject,
     top_level: bool,
@@ -123,7 +118,7 @@ unsafe fn walk_folders<B>(
     ControlFlow::Continue(())
 }
 
-/// Costs one batched title fetch per folder plus one name fetch per level.
+/// One title fetch per folder, one name fetch per level.
 pub(super) unsafe fn locate_note_in_folders(
     folders_arr: &AnyObject,
     target: &NSString,
@@ -153,8 +148,7 @@ pub(super) unsafe fn collect_titles_in_folders(folders_arr: &AnyObject, out: &mu
     };
 }
 
-/// Every per-note column except the title, each fetched for the whole folder
-/// in one Apple Event.
+/// Per-note columns except the title, each batch-fetched for the whole folder.
 struct NoteColumns {
     ids: Vec<String>,
     bodies: Vec<String>,
@@ -268,9 +262,8 @@ pub(super) struct SearchFields {
     pub body: bool,
 }
 
-/// Bodies are matched on Notes' own `plaintext`, so a query such as "div" or
-/// "&" does not hit every note through its markup. Titles and plain text are
-/// batch-fetched per folder; the other columns only for folders with a match.
+/// Bodies are matched on Notes' `plaintext`, so "div" or "&" do not hit markup.
+/// Columns beyond title and text are fetched only for folders with a match.
 pub(super) unsafe fn search_notes_in_folders(
     folders_arr: &AnyObject,
     account_name: &Arc<str>,

@@ -1,12 +1,7 @@
-//! Tests that drive a real Notes.app. They are `#[ignore]`d so `cargo test`
-//! stays hermetic; run them with:
-//!
-//!   cargo test -- --ignored --nocapture
-//!
-//! They require Notes.app to be installed and the test binary to hold the
-//! Automation permission for it. The write tests create and then remove notes
-//! and folders prefixed with `__apple_notes_mcp_test`. Deleted test notes land
-//! in Recently Deleted, which this server never touches, so they stay there
+//! Tests against a live Notes.app, `#[ignore]`d to keep `cargo test` hermetic.
+//! Run them with `cargo test -- --ignored --nocapture`; the test binary needs
+//! Automation permission for Notes. Write tests use names prefixed
+//! `__apple_notes_mcp_test`, and their deleted notes stay in Recently Deleted
 //! until Notes purges them.
 
 use super::api::NotesApp;
@@ -21,7 +16,7 @@ fn app() -> NotesApp {
     NotesApp::connect().expect("failed to connect to Notes.app")
 }
 
-/// Remove anything a previous aborted run may have left behind.
+/// Removes leftovers from an aborted run.
 fn clean(app: &NotesApp) {
     let _ = app.delete_note(TEST_NOTE);
     let _ = app.delete_note(RENAMED_NOTE);
@@ -469,7 +464,7 @@ fn deleted_notes_are_not_found_by_title() {
     app.create_note(TEST_NOTE, "<div>body</div>", None).unwrap();
     assert!(app.delete_note(TEST_NOTE).unwrap());
 
-    // The trashed copy must not be matched: deleting it again would be permanent.
+    // The trashed copy must not match: deleting it again would be permanent.
     assert!(app.get_note_by_title(TEST_NOTE).unwrap().is_none());
     assert!(!app.list_notes().unwrap().iter().any(|t| t == TEST_NOTE));
     assert!(

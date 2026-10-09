@@ -59,8 +59,8 @@ impl NotesApp {
         })
     }
 
-    /// Walks folders like `find_note` does, so every title listed here is one
-    /// `get_note` can find.
+    /// Walks folders like `find_note`, so each title is one `get_note` can
+    /// find.
     #[instrument(skip(self))]
     pub fn list_notes(&self) -> Result<Vec<String>> {
         self.run(|| unsafe {

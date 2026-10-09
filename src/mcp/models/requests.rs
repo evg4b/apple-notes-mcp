@@ -3,12 +3,10 @@ use rmcp::schemars;
 use rmcp::serde::Deserialize;
 use schemars::JsonSchema;
 
-/// An uncapped bulk read returns every body in the library and can exhaust a
-/// client's context in a single call.
+/// Uncapped bulk reads can exhaust a client's context in one call.
 pub(crate) const DEFAULT_NOTE_LIMIT: usize = 50;
 
-// Inlined into five tool schemas, so a doc comment here is paid for five
-// times. The `format` field below carries the explanation once.
+// Inlined into five tool schemas, so the `format` fields document it instead.
 #[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum BodyFormat {
@@ -27,7 +25,7 @@ impl BodyFormat {
 
 #[derive(Clone, Copy, Deserialize, JsonSchema)]
 pub(crate) struct BodyOptions {
-    /// Body rendering: "text" (default, far smaller) or "html".
+    /// Body format: "text" (default, smaller) or "html".
     pub format: Option<BodyFormat>,
     /// Maximum notes to return. Defaults to 50.
     pub limit: Option<usize>,
@@ -48,15 +46,15 @@ pub(crate) struct EmptyRequest {}
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct TitleRequest {
-    /// Exact title of the note.
+    /// Exact note title.
     pub title: String,
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct GetNoteRequest {
-    /// Exact title of the note.
+    /// Exact note title.
     pub title: String,
-    /// Body rendering: "text" (default, far smaller) or "html".
+    /// Body format: "text" (default, smaller) or "html".
     pub format: Option<BodyFormat>,
 }
 
@@ -90,9 +88,9 @@ pub(crate) struct AccountNotesRequest {
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct SearchRequest {
-    /// Case-insensitive substring to look for.
+    /// Case-insensitive substring.
     pub query: String,
-    /// Search bodies as well as titles. Defaults to true.
+    /// Also search bodies. Defaults to true.
     pub in_body: Option<bool>,
     #[serde(flatten)]
     pub body: BodyOptions,
@@ -106,11 +104,11 @@ impl SearchRequest {
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct CreateNoteRequest {
-    /// Title for the new note.
+    /// Note title.
     pub title: String,
     /// HTML body.
     pub content: String,
-    /// Destination folder. Defaults to the Notes default folder.
+    /// Destination folder. Defaults to Notes' default folder.
     pub folder: Option<String>,
 }
 
@@ -118,23 +116,23 @@ pub(crate) struct CreateNoteRequest {
 pub(crate) struct UpdateNoteRequest {
     /// Current exact title.
     pub title: String,
-    /// New title. Omit to keep.
+    /// New title; omit to keep.
     pub new_title: Option<String>,
-    /// New HTML body, replacing the old one. Omit to keep.
+    /// New HTML body, replacing the old one; omit to keep.
     pub new_content: Option<String>,
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct AppendNoteRequest {
-    /// Exact title of the note.
+    /// Exact note title.
     pub title: String,
-    /// HTML to add at the end.
+    /// HTML to append.
     pub content: String,
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct MoveNoteRequest {
-    /// Exact title of the note.
+    /// Exact note title.
     pub title: String,
     /// Destination folder name.
     pub folder: String,
@@ -142,7 +140,7 @@ pub(crate) struct MoveNoteRequest {
 
 #[derive(Clone, Deserialize, JsonSchema)]
 pub(crate) struct CreateFolderRequest {
-    /// Name for the new folder.
+    /// Folder name.
     pub name: String,
     /// Account to create it in. Defaults to Notes' default account.
     pub account: Option<String>,

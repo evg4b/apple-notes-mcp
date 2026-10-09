@@ -1,9 +1,8 @@
-//! Notes stores every line as its own `<div>`, often with inline styles, so the
-//! markup is usually a larger share of a body than the words are. That is why
-//! plain text is the default body format.
+//! Notes bodies are mostly `<div>` markup with inline styles, so plain text is
+//! the default format.
 
-/// Tags that end the current line. Everything else is dropped silently; Notes
-/// bodies carry no scripts or styles whose text would need suppressing.
+/// Tags that end a line. Other tags are dropped; Notes bodies have no scripts
+/// or styles.
 const LINE_BREAKING_TAGS: &[&str] = &[
     "br",
     "div",
@@ -50,16 +49,15 @@ pub fn to_plain_text(html: &str) -> String {
     out.finish()
 }
 
-/// Plain text tidied as it is written: each line loses its trailing
-/// whitespace when it ends, runs of blank lines collapse to one, and the ends
-/// are trimmed. Tidying on the fly keeps a body's conversion to one buffer.
+/// Plain text tidied as it is written: trailing whitespace dropped, blank-line
+/// runs collapsed, ends trimmed. One buffer per body.
 struct PlainText {
     out: String,
-    /// Where the line being written starts in `out`.
+    /// Start of the current line in `out`.
     line_start: usize,
     blank_run: usize,
-    /// Whether the text written so far, before tidying, ends partway through
-    /// a line. Line-breaking tags only end a line that has started.
+    /// Whether the raw text ends mid-line. Line-breaking tags only end a
+    /// started line.
     in_line: bool,
 }
 
@@ -113,7 +111,7 @@ impl PlainText {
         self.line_start = self.out.len();
     }
 
-    /// Drop the current line's trailing whitespace and return its length.
+    /// Trims the current line and returns its length.
     fn trim_line(&mut self) -> usize {
         let line_len = self.out[self.line_start..].trim_end().len();
         self.out.truncate(self.line_start + line_len);
@@ -139,8 +137,7 @@ fn breaks_line(tag: &str) -> bool {
         .any(|known| known.eq_ignore_ascii_case(name))
 }
 
-/// Where decoded text goes: [`PlainText`] in production, a bare `String` for
-/// the reference implementation in the tests.
+/// Decoder output: [`PlainText`], or a raw `String` in the tests.
 trait TextSink {
     fn push_str(&mut self, text: &str);
     fn push(&mut self, ch: char);
@@ -177,7 +174,7 @@ fn push_decoded(out: &mut impl TextSink, text: &str) {
         out.push_str(&rest[..amp]);
 
         let after_amp = &rest[amp + 1..];
-        // Entities are short; a '&' with no nearby ';' is a literal ampersand.
+        // A '&' with no ';' soon after is literal.
         match after_amp
             .char_indices()
             .take_while(|(i, _)| *i < 12)
@@ -219,8 +216,7 @@ fn decode_entity(body: &str) -> Option<char> {
 mod tests {
     use super::*;
 
-    /// Reference implementation: build the raw text, then tidy it into a second
-    /// buffer.
+    /// Reference: build the raw text, then tidy it into a second buffer.
     fn two_pass(html: &str) -> String {
         let mut raw = String::new();
         let mut rest = html;

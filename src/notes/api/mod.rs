@@ -18,13 +18,13 @@ use super::helpers::{keys, kvc_get, kvc_index_of, kvc_string_vec, sb_at, sb_coun
 pub struct NotesApp {
     sb_app: Retained<SBApplication>,
     events: Retained<EventErrorDelegate>,
-    /// Held for the whole of every operation; see [`NotesApp::run`].
+    /// Held for every operation; see [`NotesApp::run`].
     session: Mutex<()>,
 }
 
-// SAFETY: every use of `sb_app` and `events` after construction happens inside
-// `run`, which holds `session`, so neither is ever used from two threads at
-// once. Neither is tied to the thread that created it.
+// SAFETY: `sb_app` and `events` are only used inside `run`, which holds
+// `session`, so never from two threads at once. Neither is bound to the thread
+// that created it.
 unsafe impl Send for NotesApp {}
 unsafe impl Sync for NotesApp {}
 
@@ -48,8 +48,7 @@ impl NotesApp {
             session: Mutex::new(()),
         };
 
-        // A failed probe is not fatal: every tool call reports the same error
-        // to the client, which is where the user will actually see it.
+        // Not fatal: every tool call reports the same error to the client.
         match app.list_accounts() {
             Ok(accounts) if accounts.is_empty() => warn!(
                 "Notes returned 0 accounts — Automation permission is probably missing. \
@@ -63,14 +62,10 @@ impl NotesApp {
         Ok(app)
     }
 
-    /// Run one operation against Notes.
-    ///
-    /// Operations are serialized, which is what makes sharing `NotesApp`
-    /// across threads sound. Each drains its own autorelease pool, since the
-    /// calling threads have none and autoreleased note bodies would pile up.
-    ///
-    /// A failed Apple Event makes its call return nil, which would read as an
-    /// empty result, so it is turned into an error here.
+    /// Runs one Notes operation. Operations are serialized, which makes `Sync`
+    /// sound, and each drains its own autorelease pool, since the calling
+    /// threads have none. A failed Apple Event, which would read as an empty
+    /// result, becomes an error.
     fn run<T>(&self, op: impl FnOnce() -> Result<T>) -> Result<T> {
         let _session = self.session.lock().unwrap_or_else(PoisonError::into_inner);
         autoreleasepool(|_| {
@@ -84,9 +79,8 @@ impl NotesApp {
         })
     }
 
-    /// Walks folders instead of the application's flat `notes`, which includes
-    /// trashed notes: a write could land on a deleted copy, and deleting that
-    /// copy is permanent.
+    /// Walks folders: the flat `notes` list includes trashed notes, and
+    /// deleting one of those is permanent.
     unsafe fn find_note(&self, title: &str) -> Option<FoundNote> {
         unsafe {
             let target = NSString::from_str(title);
@@ -99,9 +93,8 @@ impl NotesApp {
         }
     }
 
-    /// Breadth-first across all accounts, so a top-level folder wins over a
-    /// nested one with the same name. `prefer` puts one account's folders
-    /// ahead of the rest at every depth.
+    /// Breadth-first, so a top-level match wins; `prefer` puts one account
+    /// first at every depth.
     unsafe fn find_folder(&self, folder_name: &str, prefer: Option<&str>) -> Option<FoundFolder> {
         unsafe {
             let target = NSString::from_str(folder_name);
@@ -137,7 +130,7 @@ impl NotesApp {
         }
     }
 
-    /// The account Notes creates new notes in, falling back to the first one.
+    /// Notes' default account, else the first one.
     unsafe fn default_account(&self) -> Result<Retained<AnyObject>> {
         unsafe {
             if let Some(account) = kvc_get(self.sb_app.as_ref(), keys::default_account()) {
@@ -159,9 +152,8 @@ impl NotesApp {
         }
     }
 
-    /// Every account with its name. The names are batch-fetched in one Apple
-    /// Event; the accounts themselves are resolved lazily, so a caller that
-    /// stops early skips the rest.
+    /// Account names are batch-fetched once and accounts resolve lazily, so
+    /// stopping early saves Apple Events.
     unsafe fn accounts(&self) -> impl Iterator<Item = (Retained<AnyObject>, Arc<str>)> {
         let accounts_arr = unsafe { app_accounts(&self.sb_app) };
         let mut names = unsafe { kvc_string_vec(&accounts_arr, keys::name()) };
@@ -177,8 +169,8 @@ struct FoundNote {
     account: Arc<str>,
 }
 
-/// Kept as a position in the parent's element array so it can be removed as
-/// well as read.
+/// A position in the parent array, so the folder can be removed as well as
+/// read.
 struct FoundFolder {
     parent: Retained<AnyObject>,
     index: usize,

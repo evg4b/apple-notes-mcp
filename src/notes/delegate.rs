@@ -13,10 +13,9 @@ pub(super) struct EventErrors {
 }
 
 define_class!(
-    /// Without a delegate, `SBApplication` raises an Objective-C exception for
-    /// every failed Apple Event, and the exception aborts the process because
-    /// it cannot unwind through Rust. This delegate records the failure and
-    /// lets the call return nil.
+    /// Turns failed Apple Events into errors. Without a delegate,
+    /// `SBApplication` raises an Objective-C exception, which aborts the
+    /// process because it cannot unwind through Rust.
     #[unsafe(super(NSObject))]
     #[name = "AppleNotesMCPEventErrorDelegate"]
     #[ivars = EventErrors]
@@ -28,8 +27,7 @@ define_class!(
         #[unsafe(method(eventDidFail:withError:))]
         fn event_did_fail(&self, _event: NonNull<AppleEvent>, error: &NSError) -> *mut AnyObject {
             let mut first = self.ivars().first.borrow_mut();
-            // Later failures in the same operation are usually knock-on
-            // effects of the first one.
+            // Later failures are usually caused by the first.
             if first.is_none() {
                 *first = Some(describe(error));
             }
@@ -44,7 +42,7 @@ impl EventErrorDelegate {
         unsafe { msg_send![super(this), init] }
     }
 
-    /// The first Apple Event failure since the last call, if any.
+    /// First failure since the last call.
     pub(super) fn take_error(&self) -> Option<String> {
         self.ivars().first.take()
     }
@@ -62,8 +60,7 @@ fn describe(error: &NSError) -> String {
     describe_code(error.code(), &message)
 }
 
-/// Hints for the OSStatus codes Notes calls commonly hit, whose raw messages
-/// are generic.
+/// Hints for common OSStatus codes, whose raw messages are generic.
 fn describe_code(code: isize, message: &str) -> String {
     let hint = match code {
         -1743 => Some(

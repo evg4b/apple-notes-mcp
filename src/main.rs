@@ -17,8 +17,7 @@ async fn main() -> Result<()> {
 
     log::init(args.log_file, args.log_level)?;
 
-    // MCP clients rarely show a server's stderr, so the log file is where a
-    // failure gets seen.
+    // MCP clients rarely show stderr, so log the failure where it is seen.
     let result = serve(args.scopes).await;
     if let Err(error) = &result {
         error!(error = format!("{error:#}"), "MCP server failed");

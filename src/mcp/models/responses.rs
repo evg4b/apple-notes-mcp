@@ -12,8 +12,7 @@ pub(crate) struct NoteTitlesResponse {
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub(crate) struct NotesResponse {
     pub notes: Vec<NoteInfo>,
-    /// Present when `limit` cut the result short. Raise `limit`, or narrow the
-    /// query, to see the rest.
+    /// Set when `limit` cut the result short.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub truncated: bool,
 }
@@ -30,7 +29,7 @@ impl NotesResponse {
 
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub(crate) struct NoteResponse {
-    /// Null when no note has that title.
+    /// Null if no note has that title.
     pub note: Option<NoteInfo>,
 }
 
@@ -61,11 +60,11 @@ pub(crate) struct AttachmentsResponse {
 /// Outcome of a note write or delete.
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub(crate) struct WriteResponse {
-    /// True when the operation applied.
+    /// True if the operation applied.
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<PartialNoteInfo>,
-    /// Why it failed. Absent on success.
+    /// Why it failed; absent on success.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -98,7 +97,7 @@ pub(crate) struct FolderWriteResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder: Option<FolderInfo>,
-    /// Why it failed. Absent on success.
+    /// Why it failed; absent on success.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -200,8 +199,8 @@ mod tests {
         );
     }
 
-    /// A note body as Notes stores it: one `<div>` per line, inline styles,
-    /// entity-escaped punctuation.
+    /// A body as Notes stores it: a `<div>` per line, inline styles, escaped
+    /// entities.
     const REALISTIC_BODY: &str = concat!(
         r#"<div><h1>Q3 planning</h1></div><div><br></div>"#,
         r#"<div><span style="font-family: Helvetica; font-size: 14px">"#,
