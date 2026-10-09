@@ -6,7 +6,7 @@ mod notes;
 use anyhow::Result;
 use clap::Parser;
 use cli::Args;
-use mcp::AppleNotesMCP;
+use mcp::{AppleNotesMCP, ScopeSet};
 use notes::NotesApp;
 use rmcp::{ServiceExt, transport::stdio};
 use tracing::info;
@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     log::init(args.log_file, args.log_level)?;
 
     let notes_app = NotesApp::connect()?;
-    let service = AppleNotesMCP::new(notes_app, args.scopes)
+    let service = AppleNotesMCP::new(notes_app, ScopeSet::from_iter(args.scopes))
         .serve(stdio())
         .await?;
 
