@@ -173,65 +173,40 @@ pub(super) fn take_at(values: &mut [String], index: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use objc2::class;
-    use objc2_foundation::NSNumber;
-    use objc2_foundation::ns_string;
+    use objc2_foundation::{NSMutableDictionary, NSNumber, ns_string};
 
-    unsafe fn new_dict() -> Retained<AnyObject> {
-        let alloc: *mut AnyObject = msg_send![class!(NSMutableDictionary), alloc];
-        let init: *mut AnyObject = msg_send![alloc, init];
-        unsafe { Retained::from_raw(init).unwrap() }
+    type Dict = Retained<NSMutableDictionary<NSString, AnyObject>>;
+
+    fn new_dict() -> Dict {
+        NSMutableDictionary::new()
     }
 
-    unsafe fn dict_set(obj: &AnyObject, key: &NSString, val: &AnyObject) {
-        let _: () = msg_send![obj, setValue: val, forKey: key];
+    fn dict_set(dict: &Dict, key: &str, val: &AnyObject) {
+        dict.insert(&*NSString::from_str(key), val);
     }
 
-    unsafe fn dict_set_str(obj: &AnyObject, key: &str, val: &str) {
-        let k = NSString::from_str(key);
-        let v = NSString::from_str(val);
-        unsafe { dict_set(obj, &k, &v) };
+    fn dict_set_str(dict: &Dict, key: &str, val: &str) {
+        dict_set(dict, key, &NSString::from_str(val));
     }
 
-    unsafe fn dict_set_bool(obj: &AnyObject, key: &str, val: bool) {
-        let k = NSString::from_str(key);
-        let n: Retained<NSNumber> = msg_send![class!(NSNumber), numberWithBool: val];
-        unsafe { dict_set(obj, &k, &n) };
+    fn dict_set_bool(dict: &Dict, key: &str, val: bool) {
+        dict_set(dict, key, &NSNumber::numberWithBool(val));
     }
 
-    unsafe fn nsarray(items: &[&str]) -> Retained<AnyObject> {
-        if items.is_empty() {
-            return msg_send![class!(NSArray), array];
-        }
-        let strings: Vec<Retained<NSString>> =
-            items.iter().map(|&s| NSString::from_str(s)).collect();
-        let ptrs: Vec<*const AnyObject> = strings
-            .iter()
-            .map(|s| s.as_ref() as *const NSString as *const AnyObject)
-            .collect();
-        msg_send![class!(NSArray), arrayWithObjects: ptrs.as_ptr(), count: ptrs.len()]
+    fn nsarray(items: &[&str]) -> Retained<NSArray<NSString>> {
+        let strings: Vec<_> = items.iter().map(|s| NSString::from_str(s)).collect();
+        NSArray::from_retained_slice(&strings)
     }
 
-    unsafe fn nsarray_bools(items: &[bool]) -> Retained<AnyObject> {
-        let numbers: Vec<Retained<NSNumber>> = items
-            .iter()
-            .map(|&b| msg_send![class!(NSNumber), numberWithBool: b])
-            .collect();
-        let ptrs: Vec<*const AnyObject> = numbers
-            .iter()
-            .map(|n| n.as_ref() as *const NSNumber as *const AnyObject)
-            .collect();
-        if ptrs.is_empty() {
-            return msg_send![class!(NSArray), array];
-        }
-        msg_send![class!(NSArray), arrayWithObjects: ptrs.as_ptr(), count: ptrs.len()]
+    fn nsarray_bools(items: &[bool]) -> Retained<NSArray<NSNumber>> {
+        let numbers: Vec<_> = items.iter().map(|&b| NSNumber::numberWithBool(b)).collect();
+        NSArray::from_retained_slice(&numbers)
     }
 
     /// Shaped like what `valueForKey:` on an SBElementArray returns.
-    unsafe fn dict_with_column(key: &str, values: Retained<AnyObject>) -> Retained<AnyObject> {
-        let dict = unsafe { new_dict() };
-        let k = NSString::from_str(key);
-        unsafe { dict_set(&dict, &k, &values) };
+    fn dict_with_column(key: &str, values: &AnyObject) -> Dict {
+        let dict = new_dict();
+        dict_set(&dict, key, values);
         dict
     }
 
@@ -273,9 +248,7 @@ mod tests {
     fn kvc_string_falls_back_to_description_for_non_strings() {
         unsafe {
             let dict = new_dict();
-            let k = NSString::from_str("count");
-            let n: Retained<NSNumber> = msg_send![class!(NSNumber), numberWithInt: 42i32];
-            dict_set(&dict, &k, &n);
+            dict_set(&dict, "count", &NSNumber::numberWithInt(42));
             assert_eq!(kvc_string(&dict, ns_string!("count")), "42");
         }
     }
@@ -351,7 +324,7 @@ mod tests {
     #[test]
     fn kvc_string_vec_returns_every_element() {
         unsafe {
-            let dict = dict_with_column("name", nsarray(&["a", "b", "c"]));
+            let dict = dict_with_column("name", &nsarray(&["a", "b", "c"]));
             assert_eq!(kvc_string_vec(&dict, keys::name()), vec!["a", "b", "c"]);
         }
     }
@@ -376,7 +349,7 @@ mod tests {
     #[test]
     fn kvc_bool_vec_returns_every_element() {
         unsafe {
-            let dict = dict_with_column("shared", nsarray_bools(&[true, false, true]));
+            let dict = dict_with_column("shared", &nsarray_bools(&[true, false, true]));
             assert_eq!(kvc_bool_vec(&dict, keys::shared()), vec![true, false, true]);
         }
     }
@@ -384,7 +357,7 @@ mod tests {
     #[test]
     fn kvc_index_of_finds_matching_element() {
         unsafe {
-            let dict = dict_with_column("name", nsarray(&["one", "two", "three"]));
+            let dict = dict_with_column("name", &nsarray(&["one", "two", "three"]));
             let target = NSString::from_str("two");
             assert_eq!(kvc_index_of(&dict, keys::name(), &target), Some(1));
         }
@@ -393,7 +366,7 @@ mod tests {
     #[test]
     fn kvc_index_of_returns_first_match() {
         unsafe {
-            let dict = dict_with_column("name", nsarray(&["dup", "dup"]));
+            let dict = dict_with_column("name", &nsarray(&["dup", "dup"]));
             let target = NSString::from_str("dup");
             assert_eq!(kvc_index_of(&dict, keys::name(), &target), Some(0));
         }
@@ -402,7 +375,7 @@ mod tests {
     #[test]
     fn kvc_index_of_is_case_sensitive() {
         unsafe {
-            let dict = dict_with_column("name", nsarray(&["Note"]));
+            let dict = dict_with_column("name", &nsarray(&["Note"]));
             let target = NSString::from_str("note");
             assert_eq!(kvc_index_of(&dict, keys::name(), &target), None);
         }
@@ -411,7 +384,7 @@ mod tests {
     #[test]
     fn kvc_index_of_returns_none_when_absent() {
         unsafe {
-            let dict = dict_with_column("name", nsarray(&["one"]));
+            let dict = dict_with_column("name", &nsarray(&["one"]));
             let target = NSString::from_str("missing");
             assert_eq!(kvc_index_of(&dict, keys::name(), &target), None);
         }
