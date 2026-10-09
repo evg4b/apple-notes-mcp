@@ -36,9 +36,8 @@ pub(super) unsafe fn account_info(obj: &AnyObject) -> AccountInfo {
     }
 }
 
-/// Build a [`NoteInfo`] from a single note proxy. The folder and account names
-/// come from the caller because walking back up the containment chain would
-/// cost extra Apple Events per note.
+/// Folder and account names come from the caller: walking back up the
+/// containment chain would cost extra Apple Events per note.
 pub(super) unsafe fn note_info(obj: &AnyObject, folder_name: &str, account_name: &str) -> NoteInfo {
     NoteInfo {
         id: unsafe { kvc_string(obj, keys::id()) },
@@ -92,15 +91,12 @@ pub(super) unsafe fn collect_folders(
 /// the folder, so it is recognised by name; Notes reports it in English.
 const RECENTLY_DELETED: &str = "Recently Deleted";
 
-/// Whether the folder named `name` at the given depth is Recently Deleted.
-/// Only a top-level folder can be; a user folder nested somewhere with the
-/// same name is left alone.
+/// Only a top-level folder can be the trash; a nested user folder with the same
+/// name is left alone.
 pub(super) fn is_trash(name: &str, top_level: bool) -> bool {
     top_level && name == RECENTLY_DELETED
 }
 
-/// Where a note sits: its folder's element array and its index in it, which
-/// is enough to read it, write it, or remove it.
 pub(super) struct NoteLocation {
     pub notes: Retained<AnyObject>,
     pub index: usize,
@@ -113,9 +109,7 @@ impl NoteLocation {
     }
 }
 
-/// Find the first note titled `target` in a folder array or anything nested
-/// under it, skipping Recently Deleted. Costs one batched title fetch per
-/// folder plus one name fetch per level.
+/// Costs one batched title fetch per folder plus one name fetch per level.
 pub(super) unsafe fn locate_note_in_folders(
     folders_arr: &AnyObject,
     target: &NSString,
@@ -148,8 +142,6 @@ pub(super) unsafe fn locate_note_in_folders(
     None
 }
 
-/// Recurses into subfolders, skipping Recently Deleted. One batched fetch per
-/// folder.
 pub(super) unsafe fn collect_titles_in_folders(
     folders_arr: &AnyObject,
     top_level: bool,
@@ -171,10 +163,6 @@ pub(super) unsafe fn collect_titles_in_folders(
     }
 }
 
-/// Each `kvc_*_vec` call is a single "get every note's <property>" Apple Event,
-/// so a folder of N notes costs 8 Apple Events rather than 8N. The per-note
-/// values are moved out of the column vectors rather than cloned, note bodies
-/// being the largest strings in the payload.
 pub(super) unsafe fn collect_notes_in_folder(
     folder: &AnyObject,
     folder_name: &str,
@@ -217,7 +205,6 @@ pub(super) unsafe fn collect_notes_in_folder(
     }
 }
 
-/// Recurses into subfolders, skipping Recently Deleted.
 pub(super) unsafe fn collect_notes_in_folders(
     folders_arr: &AnyObject,
     account_name: &str,
@@ -280,9 +267,6 @@ pub(super) struct SearchFields {
     pub body: bool,
 }
 
-/// Search a folder array recursively, appending matches until `limit` is hit.
-/// Recently Deleted is skipped.
-///
 /// Titles (and plain-text bodies, when searched) are batch-fetched per folder.
 /// Bodies are matched on Notes' own `plaintext`, not the HTML, so a query such
 /// as "div" or "&" does not hit every note through its markup. The remaining

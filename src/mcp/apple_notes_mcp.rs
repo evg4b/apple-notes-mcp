@@ -7,8 +7,6 @@ use tracing::debug;
 #[derive(Clone)]
 pub struct AppleNotesMCP {
     pub(super) app: Arc<NotesApp>,
-    /// Built once at construction: `list_tools` and `call_tool` run on every
-    /// request and must not rebuild the route map.
     pub(super) router: Arc<ToolRouter<Self>>,
 }
 
@@ -211,9 +209,8 @@ mod tests {
             );
         }
     }
-    /// Clients fetch the whole tool list once per session and many keep it in
-    /// context afterwards, so its size is a standing cost. The budget turns a
-    /// long new description into a failing test.
+
+    /// Clients keep the tool list in context, so its size is a standing cost.
     #[test]
     fn tool_list_fits_the_budget() {
         const BUDGET_BYTES: usize = 23_000;

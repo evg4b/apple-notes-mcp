@@ -24,7 +24,6 @@ const LINE_BREAKING_TAGS: &[&str] = &[
     "h6",
 ];
 
-/// Strip the markup out of an HTML body, keeping its line structure.
 pub fn to_plain_text(html: &str) -> String {
     let mut out = String::with_capacity(html.len() / 2);
     let mut rest = html;
@@ -51,7 +50,6 @@ pub fn to_plain_text(html: &str) -> String {
     tidy(out)
 }
 
-/// Does this tag body (the text between `<` and `>`) end the current line?
 fn breaks_line(tag: &str) -> bool {
     let name = tag
         .trim_start_matches('/')
@@ -69,7 +67,6 @@ fn push_line_break(out: &mut String) {
     }
 }
 
-/// Append `text`, resolving the HTML entities Notes actually emits.
 fn push_decoded(out: &mut String, text: &str) {
     let mut rest = text;
     loop {
@@ -100,7 +97,6 @@ fn push_decoded(out: &mut String, text: &str) {
     }
 }
 
-/// Resolve the body of an entity, meaning whatever sits between `&` and `;`.
 fn decode_entity(body: &str) -> Option<char> {
     match body {
         "amp" => return Some('&'),
@@ -119,7 +115,6 @@ fn decode_entity(body: &str) -> Option<char> {
     char::from_u32(code)
 }
 
-/// Drop trailing spaces, collapse runs of blank lines, and trim the ends.
 fn tidy(text: String) -> String {
     let mut out = String::with_capacity(text.len());
     let mut blank_run = 0;

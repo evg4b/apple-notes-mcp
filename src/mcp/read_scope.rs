@@ -9,8 +9,6 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{Json, tool};
 use tracing::{info, warn};
 
-/// Report a failed scripting call as a tool error.
-///
 /// An empty payload would tell the client "nothing matched", and it would act
 /// on that — offer to create a note that already exists, say. An error keeps
 /// "Notes could not be read" distinct from "there is nothing there".

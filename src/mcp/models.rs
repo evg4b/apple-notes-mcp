@@ -3,11 +3,8 @@ use rmcp::schemars;
 use rmcp::serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 
-/// Notes returned when a bulk read is called without an explicit `limit`.
-///
-/// Every bulk read is capped: an uncapped one returns every body in the library
-/// and can exhaust a client's context in a single call. Responses say when the
-/// cap cut something off.
+/// An uncapped bulk read returns every body in the library and can exhaust a
+/// client's context in a single call.
 pub(crate) const DEFAULT_NOTE_LIMIT: usize = 50;
 
 // Inlined into five tool schemas, so a doc comment here is paid for five
@@ -394,7 +391,6 @@ mod tests {
         r#"<li>Book the review</li><li>Send it round</li></ul></div>"#,
     );
 
-    /// One note of `REALISTIC_BODY`, rendered the way a tool call would.
     fn rendered(format: BodyFormat) -> NotesResponse {
         let page = NotePage {
             notes: vec![note_with_body(REALISTIC_BODY)],

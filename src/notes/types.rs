@@ -77,8 +77,8 @@ pub struct NotePage {
 }
 
 impl NotePage {
-    /// Build a page from a collection run that was allowed one note past
-    /// `limit`, so a full result can be told apart from an overflowing one.
+    /// `notes` was collected up to `limit + 1`, so a full page can be told
+    /// apart from an overflowing one.
     pub(super) fn from_overshoot(mut notes: Vec<NoteInfo>, limit: usize) -> Self {
         let truncated = notes.len() > limit;
         notes.truncate(limit);

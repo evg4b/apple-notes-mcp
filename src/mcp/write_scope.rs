@@ -9,8 +9,8 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{Json, tool};
 use tracing::{info, warn};
 
-/// Map a note write to its response, reporting the reason on failure so the
-/// client can tell "no such note" apart from "Notes refused the command".
+/// Reports the reason on failure so the client can tell "no such note" apart
+/// from "Notes refused the command".
 fn note_result(
     tool: &'static str,
     title: &str,

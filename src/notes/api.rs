@@ -20,8 +20,8 @@ pub struct NotesApp {
     sb_app: Retained<SBApplication>,
 }
 
-// ScriptingBridge sends synchronous Apple Events which macOS serializes at the
-// OS level, so sharing a single proxy across threads is safe in practice.
+// SAFETY: ScriptingBridge sends synchronous Apple Events, which macOS
+// serializes, so sharing one proxy across threads is safe in practice.
 unsafe impl Send for NotesApp {}
 unsafe impl Sync for NotesApp {}
 
@@ -110,8 +110,6 @@ impl NotesApp {
         }
     }
 
-    /// Every note, capped at `limit`. One note past the cap is collected so the
-    /// caller can report whether anything was left behind.
     #[instrument(skip(self))]
     pub fn get_all_notes(&self, limit: usize) -> Result<NotePage> {
         unsafe {
@@ -126,8 +124,6 @@ impl NotesApp {
         }
     }
 
-    /// The first note titled `title` in any folder or subfolder of any
-    /// account, Recently Deleted aside.
     #[instrument(skip(self))]
     pub fn get_note_by_title(&self, title: &str) -> Result<Option<NoteInfo>> {
         unsafe {
@@ -181,8 +177,6 @@ impl NotesApp {
         }
     }
 
-    /// `limit` caps the results so a broad query cannot pull an entire library
-    /// into memory.
     #[instrument(skip(self))]
     pub fn search_notes(&self, query: &str, in_body: bool, limit: usize) -> Result<NotePage> {
         if limit == 0 {
@@ -309,8 +303,6 @@ impl NotesApp {
                 return Ok(None);
             };
             let note = found.location.note();
-            // A locked note reads back with an empty body; writing `content`
-            // over it would be the whole note.
             ensure_unlocked(&note, title)?;
             let mut body = kvc_string(&note, keys::body());
             body.push_str(content);
@@ -327,9 +319,6 @@ impl NotesApp {
         }
     }
 
-    /// Move a note into `folder_name` within its own account, keeping its id,
-    /// dates and attachments.
-    ///
     /// Moves across accounts are refused: Notes carries them out by trashing
     /// the original, and the copy it is meant to leave in the destination is
     /// not reliably there.
@@ -374,8 +363,6 @@ impl NotesApp {
         }
     }
 
-    /// Create a top-level folder in `account`, or in Notes' default account
-    /// when `account` is `None`.
     #[instrument(skip(self))]
     pub fn create_folder(&self, name: &str, account: Option<&str>) -> Result<FolderInfo> {
         unsafe {
@@ -410,7 +397,6 @@ impl NotesApp {
         }
     }
 
-    /// Delete a folder, nested or not, and everything inside it.
     #[instrument(skip(self))]
     pub fn delete_folder(&self, name: &str) -> Result<bool> {
         unsafe {
@@ -474,10 +460,7 @@ impl NotesApp {
         }
     }
 
-    /// Locate a note by exact title in any folder of any account, skipping
-    /// Recently Deleted.
-    ///
-    /// The application's flat `notes` would be one Apple Event, but it includes
+    /// Walks folders instead of the application's flat `notes`, which includes
     /// trashed notes: a write could land on a deleted copy, and deleting that
     /// copy is permanent.
     unsafe fn find_note(&self, title: &str) -> Option<FoundNote> {
@@ -567,8 +550,8 @@ struct FoundNote {
     account: String,
 }
 
-/// A folder found by [`NotesApp::find_folder`], kept as its position in the
-/// parent's element array so it can be removed as well as read.
+/// Kept as a position in the parent's element array so it can be removed as
+/// well as read.
 struct FoundFolder {
     parent: Retained<AnyObject>,
     index: usize,
@@ -581,8 +564,8 @@ impl FoundFolder {
     }
 }
 
-/// Notes hides a locked note's body from scripts, so an edit would be applied
-/// against an empty body.
+/// Notes hides a locked note's body from scripts, so an edit would overwrite
+/// it with an empty one.
 unsafe fn ensure_unlocked(note: &AnyObject, title: &str) -> Result<()> {
     if unsafe { kvc_bool(note, keys::password_protected()) } {
         anyhow::bail!("{title:?} is password-protected; unlock it in Notes to edit it");
