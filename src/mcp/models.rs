@@ -10,9 +10,8 @@ use schemars::JsonSchema;
 /// cap cut something off.
 pub(crate) const DEFAULT_NOTE_LIMIT: usize = 50;
 
-// `BodyFormat` and `BodyOptions` are inlined into five tool schemas, so their
-// doc comments are paid for five times over. The prose lives on the `format`
-// field, which is the one a client actually reads.
+// Inlined into five tool schemas, so a doc comment here is paid for five
+// times. The `format` field below carries the explanation once.
 #[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum BodyFormat {

@@ -16,7 +16,6 @@ use super::helpers::{
 };
 use super::types::{AccountInfo, AttachmentInfo, FolderInfo, NoteInfo, NotePage, PartialNoteInfo};
 
-/// A live ScriptingBridge proxy to Notes.app.
 pub struct NotesApp {
     sb_app: Retained<SBApplication>,
 }
@@ -96,8 +95,6 @@ impl NotesApp {
         }
     }
 
-    /// Every note title outside Recently Deleted.
-    ///
     /// Walked folder by folder rather than read off the application's flat
     /// `notes`, which includes trashed notes: a title listed here must be one
     /// `get_note` can find.
@@ -184,10 +181,8 @@ impl NotesApp {
         }
     }
 
-    /// Case-insensitive substring search over note titles and, optionally, bodies.
-    ///
-    /// `limit` caps the number of results so a broad query cannot pull an entire
-    /// library into memory.
+    /// `limit` caps the results so a broad query cannot pull an entire library
+    /// into memory.
     #[instrument(skip(self))]
     pub fn search_notes(&self, query: &str, in_body: bool, limit: usize) -> Result<NotePage> {
         if limit == 0 {
@@ -235,7 +230,6 @@ impl NotesApp {
         }
     }
 
-    /// Create a note in `folder`, or in the default folder when `folder` is `None`.
     #[instrument(skip(self, content))]
     pub fn create_note(
         &self,
@@ -307,7 +301,6 @@ impl NotesApp {
         }
     }
 
-    /// Append HTML to the end of a note's body, leaving the existing body intact.
     #[instrument(skip(self, content))]
     pub fn append_to_note(&self, title: &str, content: &str) -> Result<Option<PartialNoteInfo>> {
         unsafe {
@@ -450,8 +443,6 @@ impl NotesApp {
         }
     }
 
-    /// Allocate a scripting object of `class_name` with its properties already set.
-    ///
     /// `initWithProperties:` carries the fields in the creation Apple Event,
     /// which is more reliable than setting them via KVC after insertion.
     unsafe fn new_object(
@@ -559,7 +550,6 @@ impl NotesApp {
         }
     }
 
-    /// Run `f` for every account, passing its proxy and name.
     unsafe fn for_each_account(&self, mut f: impl FnMut(&AnyObject, &str)) {
         unsafe {
             let accounts_arr = app_accounts(&self.sb_app);
@@ -572,7 +562,6 @@ impl NotesApp {
     }
 }
 
-/// A note found by [`NotesApp::find_note`], with the account it lives in.
 struct FoundNote {
     location: NoteLocation,
     account: String,
@@ -592,8 +581,8 @@ impl FoundFolder {
     }
 }
 
-/// Refuse to write to a password-protected note. Notes hides a locked note's
-/// body from scripts, so any edit would be made against an empty body.
+/// Notes hides a locked note's body from scripts, so an edit would be applied
+/// against an empty body.
 unsafe fn ensure_unlocked(note: &AnyObject, title: &str) -> Result<()> {
     if unsafe { kvc_bool(note, keys::password_protected()) } {
         anyhow::bail!("{title:?} is password-protected; unlock it in Notes to edit it");

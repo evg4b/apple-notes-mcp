@@ -2,10 +2,9 @@ use rmcp::schemars;
 use rmcp::schemars::JsonSchema;
 use rmcp::serde::{Deserialize, Serialize};
 
-// Doc comments on these types and their fields are copied verbatim into every
-// tool's `outputSchema`, which the client re-reads on every session. Keep them
-// to facts a field name cannot carry on its own — the prose lives in
-// docs/tools.md instead.
+// Every doc comment here is copied into the `outputSchema` of each tool that
+// returns the type, so it is paid for on every session. Explanations belong in
+// docs/tools.md.
 
 /// An account, e.g. "iCloud" or "On My Mac".
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

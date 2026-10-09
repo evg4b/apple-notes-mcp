@@ -3,8 +3,6 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2_foundation::{NSArray, NSString};
 
-/// Scripting-dictionary keys.
-///
 /// `ns_string!` caches the `NSString` after first use, so repeated property
 /// access does not allocate a fresh key object per Apple Event.
 pub(super) mod keys {
@@ -31,8 +29,6 @@ pub(super) mod keys {
     key!(default_account, "defaultAccount");
 }
 
-/// Read a scripting property via KVC (`valueForKey:`).
-///
 /// `SBObject` implements `valueForKey:` by sending an Apple Event, so this
 /// reaches any property in the Notes scripting dictionary without the selector
 /// needing to exist in the static method table.
@@ -40,8 +36,7 @@ pub(super) unsafe fn kvc_get(obj: &AnyObject, key: &NSString) -> Option<Retained
     unsafe { msg_send![obj, valueForKey: key] }
 }
 
-/// Read a scripting property as a `String`. Non-string values (e.g. `NSDate`)
-/// fall back to their `description`.
+/// Non-string values, `NSDate` among them, come back as their `description`.
 pub(super) unsafe fn kvc_string(obj: &AnyObject, key: &NSString) -> String {
     match unsafe { kvc_get(obj, key) } {
         None => String::new(),
@@ -49,8 +44,8 @@ pub(super) unsafe fn kvc_string(obj: &AnyObject, key: &NSString) -> String {
     }
 }
 
-/// Read a boolean scripting property. ScriptingBridge returns booleans as
-/// `NSNumber`, whose `charValue` is non-zero for true.
+/// ScriptingBridge returns booleans as `NSNumber`, whose `charValue` is
+/// non-zero for true.
 pub(super) unsafe fn kvc_bool(obj: &AnyObject, key: &NSString) -> bool {
     match unsafe { kvc_get(obj, key) } {
         None => false,
@@ -58,24 +53,19 @@ pub(super) unsafe fn kvc_bool(obj: &AnyObject, key: &NSString) -> bool {
     }
 }
 
-/// Set a string scripting property via KVC (`setValue:forKey:`).
 pub(super) unsafe fn kvc_set(obj: &AnyObject, key: &NSString, value: &str) {
     let val = NSString::from_str(value);
     let _: () = unsafe { msg_send![obj, setValue: &*val, forKey: key] };
 }
 
-/// Number of elements in a ScriptingBridge element array.
 pub(super) unsafe fn sb_count(arr: &AnyObject) -> usize {
     unsafe { msg_send![arr, count] }
 }
 
-/// Element at `index` in a ScriptingBridge element array.
 pub(super) unsafe fn sb_at(arr: &AnyObject, index: usize) -> Retained<AnyObject> {
     unsafe { msg_send![arr, objectAtIndex: index] }
 }
 
-/// Batch-fetch a string property from every element of an element array.
-///
 /// `valueForKey:` on the *collection* (rather than on each element) is
 /// translated by ScriptingBridge into a single "get every element's `key`"
 /// Apple Event returning a plain `NSArray`. Cost: 1 Apple Event instead of N.
@@ -83,7 +73,6 @@ pub(super) unsafe fn kvc_string_vec(collection: &AnyObject, key: &NSString) -> V
     unsafe { kvc_vec(collection, key, |elem| any_to_string(elem)) }
 }
 
-/// Batch-fetch a boolean property from every element of an element array.
 pub(super) unsafe fn kvc_bool_vec(collection: &AnyObject, key: &NSString) -> Vec<bool> {
     unsafe { kvc_vec(collection, key, |elem| any_to_bool(elem)) }
 }
@@ -136,8 +125,6 @@ unsafe fn any_to_bool(val: &AnyObject) -> bool {
     n != 0
 }
 
-/// Retrieve a ScriptingBridge element collection via `performSelector:`.
-///
 /// ScriptingBridge routes collection selectors (`notes`, `folders`, `accounts`,
 /// `attachments`) through `doesNotUnderstand:`, so they are absent from the
 /// static method table and objc2's debug `responds_to_selector:` assertion
@@ -185,8 +172,8 @@ fn starts_with_ignore_case(haystack: &str, needle: &str) -> bool {
     }
 }
 
-/// Move the `index`-th string out of `values`, leaving an empty string behind.
-/// Used to build owned structs from batch-fetched columns without cloning.
+/// Moves the value out, leaving an empty string in the slice, so owned structs
+/// can be built from batch-fetched columns without cloning them.
 pub(super) fn take_at(values: &mut [String], index: usize) -> String {
     values
         .get_mut(index)
@@ -251,8 +238,7 @@ mod tests {
         msg_send![class!(NSArray), arrayWithObjects: ptrs.as_ptr(), count: ptrs.len()]
     }
 
-    /// A dictionary whose value for `key` is an array — the shape
-    /// `valueForKey:` on an SBElementArray returns.
+    /// Shaped like what `valueForKey:` on an SBElementArray returns.
     unsafe fn dict_with_column(key: &str, values: Retained<AnyObject>) -> Retained<AnyObject> {
         let dict = unsafe { new_dict() };
         let k = NSString::from_str(key);

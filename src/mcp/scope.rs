@@ -1,6 +1,5 @@
 use clap::ValueEnum;
 
-/// A capability group that gates which tools get registered.
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
     Read,

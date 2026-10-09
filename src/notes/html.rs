@@ -1,9 +1,6 @@
-//! Turning Apple Notes' HTML bodies into plain text.
-//!
-//! Notes stores every line as its own `<div>`, often carrying inline styles, so
-//! the markup is typically a larger share of a body than the words are. Clients
-//! that only want to read a note pay for all of it, which is why plain text is
-//! the default body format.
+//! Notes stores every line as its own `<div>`, often with inline styles, so the
+//! markup is usually a larger share of a body than the words are. That is why
+//! plain text is the default body format.
 
 /// Tags that end the current line. Everything else is dropped silently; Notes
 /// bodies carry no scripts or styles whose text would need suppressing.
@@ -41,7 +38,7 @@ pub fn to_plain_text(html: &str) -> String {
 
         let after_open = &rest[open + 1..];
         let Some(close) = after_open.find('>') else {
-            // A '<' with no matching '>' is literal text, not a tag.
+            // An unmatched '<' is literal text.
             push_decoded(&mut out, &rest[open..]);
             break;
         };

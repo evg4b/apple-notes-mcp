@@ -53,8 +53,6 @@ pub(super) unsafe fn note_info(obj: &AnyObject, folder_name: &str, account_name:
     }
 }
 
-/// Collect a folder array and, recursively, everything nested under it.
-///
 /// `id` and `name` are batch-fetched for the whole level (2 Apple Events per
 /// level instead of 2 per folder); recursion still costs one `sb_at` plus one
 /// `folders` fetch per folder.
@@ -150,8 +148,8 @@ pub(super) unsafe fn locate_note_in_folders(
     None
 }
 
-/// Collect the title of every note in a folder array, recursing into
-/// subfolders and skipping Recently Deleted. One batched fetch per folder.
+/// Recurses into subfolders, skipping Recently Deleted. One batched fetch per
+/// folder.
 pub(super) unsafe fn collect_titles_in_folders(
     folders_arr: &AnyObject,
     top_level: bool,
@@ -173,12 +171,10 @@ pub(super) unsafe fn collect_titles_in_folders(
     }
 }
 
-/// Collect every note of a folder, batch-fetching one property at a time.
-///
 /// Each `kvc_*_vec` call is a single "get every note's <property>" Apple Event,
 /// so a folder of N notes costs 8 Apple Events rather than 8N. The per-note
-/// values are moved out of the column vectors, never cloned — note bodies are
-/// the largest strings in the payload.
+/// values are moved out of the column vectors rather than cloned, note bodies
+/// being the largest strings in the payload.
 pub(super) unsafe fn collect_notes_in_folder(
     folder: &AnyObject,
     folder_name: &str,
@@ -221,8 +217,7 @@ pub(super) unsafe fn collect_notes_in_folder(
     }
 }
 
-/// Collect the notes of every folder in a folder array, recursing into
-/// subfolders and skipping Recently Deleted.
+/// Recurses into subfolders, skipping Recently Deleted.
 pub(super) unsafe fn collect_notes_in_folders(
     folders_arr: &AnyObject,
     account_name: &str,
@@ -250,7 +245,6 @@ pub(super) unsafe fn collect_notes_in_folders(
     }
 }
 
-/// Collect every attachment of a note, one batched fetch per property.
 pub(super) unsafe fn collect_attachments(
     note: &AnyObject,
     note_title: &str,
@@ -280,7 +274,6 @@ pub(super) unsafe fn collect_attachments(
     }
 }
 
-/// Which note fields a search compares against.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct SearchFields {
     pub title: bool,
