@@ -17,6 +17,14 @@ pub(crate) enum BodyFormat {
     Html,
 }
 
+impl BodyFormat {
+    fn render(self, note: &mut NoteInfo) {
+        if self == Self::Text {
+            note.body = crate::notes::to_plain_text(&note.body);
+        }
+    }
+}
+
 #[derive(Clone, Copy, Deserialize, JsonSchema)]
 pub(crate) struct BodyOptions {
     /// Body rendering: "text" (default, far smaller) or "html".
@@ -161,15 +169,10 @@ pub(crate) struct NotesResponse {
 }
 
 impl NotesResponse {
-    pub fn new(page: NotePage, format: BodyFormat) -> Self {
-        let mut notes = page.notes;
-        if format == BodyFormat::Text {
-            for note in &mut notes {
-                note.body = crate::notes::to_plain_text(&note.body);
-            }
-        }
+    pub fn new(mut page: NotePage, format: BodyFormat) -> Self {
+        page.notes.iter_mut().for_each(|note| format.render(note));
         Self {
-            notes,
+            notes: page.notes,
             truncated: page.truncated,
         }
     }
@@ -182,13 +185,10 @@ pub(crate) struct NoteResponse {
 }
 
 impl NoteResponse {
-    pub fn new(note: Option<NoteInfo>, format: BodyFormat) -> Self {
-        let note = note.map(|mut note| {
-            if format == BodyFormat::Text {
-                note.body = crate::notes::to_plain_text(&note.body);
-            }
-            note
-        });
+    pub fn new(mut note: Option<NoteInfo>, format: BodyFormat) -> Self {
+        if let Some(note) = &mut note {
+            format.render(note);
+        }
         Self { note }
     }
 }
@@ -221,20 +221,16 @@ pub(crate) struct WriteResponse {
 }
 
 impl WriteResponse {
-    pub fn found(note: PartialNoteInfo) -> Self {
+    pub fn done(note: Option<PartialNoteInfo>) -> Self {
         Self {
             success: true,
-            note: Some(note),
+            note,
             error: None,
         }
     }
 
-    pub fn not_found(what: &str) -> Self {
-        Self {
-            success: false,
-            note: None,
-            error: Some(format!("No note titled {what:?} was found")),
-        }
+    pub fn not_found(title: &str) -> Self {
+        Self::failed(format!("No note titled {title:?} was found"))
     }
 
     pub fn failed(error: String) -> Self {
@@ -255,6 +251,28 @@ pub(crate) struct FolderWriteResponse {
     /// Why it failed. Absent on success.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+impl FolderWriteResponse {
+    pub fn done(folder: Option<FolderInfo>) -> Self {
+        Self {
+            success: true,
+            folder,
+            error: None,
+        }
+    }
+
+    pub fn not_found(name: &str) -> Self {
+        Self::failed(format!("No folder named {name:?} was found"))
+    }
+
+    pub fn failed(error: String) -> Self {
+        Self {
+            success: false,
+            folder: None,
+            error: Some(error),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -315,7 +333,7 @@ mod tests {
             creation_date: None,
             modification_date: None,
         };
-        let value = to_value(WriteResponse::found(note)).unwrap();
+        let value = to_value(WriteResponse::done(Some(note))).unwrap();
         assert_eq!(value["success"], json!(true));
         assert_eq!(value["note"]["id"], json!("x-coredata://1"));
         assert!(
@@ -356,12 +374,7 @@ mod tests {
 
     #[test]
     fn folder_write_response_omits_empty_fields() {
-        let value = to_value(FolderWriteResponse {
-            success: true,
-            folder: None,
-            error: None,
-        })
-        .unwrap();
+        let value = to_value(FolderWriteResponse::done(None)).unwrap();
         assert_eq!(value, json!({ "success": true }));
     }
 

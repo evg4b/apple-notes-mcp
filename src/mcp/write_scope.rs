@@ -17,7 +17,7 @@ fn note_result(
     result: Result<Option<PartialNoteInfo>>,
 ) -> Json<WriteResponse> {
     let response = match result {
-        Ok(Some(note)) => WriteResponse::found(note),
+        Ok(Some(note)) => WriteResponse::done(Some(note)),
         Ok(None) => WriteResponse::not_found(title),
         Err(error) => {
             warn!(tool, %error, "write failed");
@@ -35,13 +35,13 @@ impl AppleNotesMCP {
     )]
     pub fn create_note(
         &self,
-        p: Parameters<CreateNoteRequest>,
+        Parameters(req): Parameters<CreateNoteRequest>,
     ) -> Result<Json<WriteResponse>, String> {
         let created = self
             .app
-            .create_note(&p.0.title, &p.0.content, p.0.folder.as_deref())
+            .create_note(&req.title, &req.content, req.folder.as_deref())
             .map(Some);
-        Ok(note_result("create_note", &p.0.title, created))
+        Ok(note_result("create_note", &req.title, created))
     }
 
     #[tool(
@@ -51,14 +51,14 @@ impl AppleNotesMCP {
     )]
     pub fn update_note(
         &self,
-        p: Parameters<UpdateNoteRequest>,
+        Parameters(req): Parameters<UpdateNoteRequest>,
     ) -> Result<Json<WriteResponse>, String> {
         let updated = self.app.update_note(
-            &p.0.title,
-            p.0.new_title.as_deref(),
-            p.0.new_content.as_deref(),
+            &req.title,
+            req.new_title.as_deref(),
+            req.new_content.as_deref(),
         );
-        Ok(note_result("update_note", &p.0.title, updated))
+        Ok(note_result("update_note", &req.title, updated))
     }
 
     #[tool(
@@ -67,19 +67,22 @@ impl AppleNotesMCP {
     )]
     pub fn append_to_note(
         &self,
-        p: Parameters<AppendNoteRequest>,
+        Parameters(req): Parameters<AppendNoteRequest>,
     ) -> Result<Json<WriteResponse>, String> {
-        let appended = self.app.append_to_note(&p.0.title, &p.0.content);
-        Ok(note_result("append_to_note", &p.0.title, appended))
+        let appended = self.app.append_to_note(&req.title, &req.content);
+        Ok(note_result("append_to_note", &req.title, appended))
     }
 
     #[tool(
         description = "Move a note to another folder, both by exact name. Within one \
                        account it keeps its id, dates and attachments."
     )]
-    pub fn move_note(&self, p: Parameters<MoveNoteRequest>) -> Result<Json<WriteResponse>, String> {
-        let moved = self.app.move_note(&p.0.title, &p.0.folder);
-        Ok(note_result("move_note", &p.0.title, moved))
+    pub fn move_note(
+        &self,
+        Parameters(req): Parameters<MoveNoteRequest>,
+    ) -> Result<Json<WriteResponse>, String> {
+        let moved = self.app.move_note(&req.title, &req.folder);
+        Ok(note_result("move_note", &req.title, moved))
     }
 
     #[tool(
@@ -88,21 +91,13 @@ impl AppleNotesMCP {
     )]
     pub fn create_folder(
         &self,
-        p: Parameters<CreateFolderRequest>,
+        Parameters(req): Parameters<CreateFolderRequest>,
     ) -> Result<Json<FolderWriteResponse>, String> {
-        let response = match self.app.create_folder(&p.0.name, p.0.account.as_deref()) {
-            Ok(folder) => FolderWriteResponse {
-                success: true,
-                folder: Some(folder),
-                error: None,
-            },
+        let response = match self.app.create_folder(&req.name, req.account.as_deref()) {
+            Ok(folder) => FolderWriteResponse::done(Some(folder)),
             Err(error) => {
                 warn!(tool = "create_folder", %error, "write failed");
-                FolderWriteResponse {
-                    success: false,
-                    folder: None,
-                    error: Some(error.to_string()),
-                }
+                FolderWriteResponse::failed(error.to_string())
             }
         };
         info!(tool = "create_folder", success = response.success, "ok");

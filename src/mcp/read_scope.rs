@@ -19,6 +19,11 @@ fn read<T>(tool: &'static str, result: Result<T>) -> Result<T, String> {
     })
 }
 
+fn listed<T>(tool: &'static str, count: usize, response: T) -> Result<Json<T>, String> {
+    info!(tool, count, "ok");
+    Ok(Json(response))
+}
+
 fn notes_ok(tool: &'static str, response: NotesResponse) -> Result<Json<NotesResponse>, String> {
     info!(
         tool,
@@ -36,23 +41,25 @@ impl AppleNotesMCP {
     )]
     pub fn list_notes(
         &self,
-        _p: Parameters<EmptyRequest>,
+        _: Parameters<EmptyRequest>,
     ) -> Result<Json<NoteTitlesResponse>, String> {
         let titles = read("list_notes", self.app.list_notes())?;
-        info!(tool = "list_notes", count = titles.len(), "ok");
-        Ok(Json(NoteTitlesResponse { titles }))
+        listed("list_notes", titles.len(), NoteTitlesResponse { titles })
     }
 
     #[tool(
         description = "One note by exact title, with its body. Returns null if nothing \
                        matches — search_notes first when unsure of the title."
     )]
-    pub fn get_note(&self, p: Parameters<GetNoteRequest>) -> Result<Json<NoteResponse>, String> {
-        let note = read("get_note", self.app.get_note_by_title(&p.0.title))?;
+    pub fn get_note(
+        &self,
+        Parameters(req): Parameters<GetNoteRequest>,
+    ) -> Result<Json<NoteResponse>, String> {
+        let note = read("get_note", self.app.get_note_by_title(&req.title))?;
         info!(tool = "get_note", found = note.is_some(), "ok");
         Ok(Json(NoteResponse::new(
             note,
-            p.0.format.unwrap_or_default(),
+            req.format.unwrap_or_default(),
         )))
     }
 
@@ -62,14 +69,14 @@ impl AppleNotesMCP {
     )]
     pub fn search_notes(
         &self,
-        p: Parameters<SearchRequest>,
+        Parameters(req): Parameters<SearchRequest>,
     ) -> Result<Json<NotesResponse>, String> {
         let page = read(
             "search_notes",
             self.app
-                .search_notes(&p.0.query, p.0.in_body(), p.0.body.limit()),
+                .search_notes(&req.query, req.in_body(), req.body.limit()),
         )?;
-        notes_ok("search_notes", NotesResponse::new(page, p.0.body.format()))
+        notes_ok("search_notes", NotesResponse::new(page, req.body.format()))
     }
 
     #[tool(
@@ -78,10 +85,10 @@ impl AppleNotesMCP {
     )]
     pub fn get_all_notes(
         &self,
-        p: Parameters<BulkNotesRequest>,
+        Parameters(req): Parameters<BulkNotesRequest>,
     ) -> Result<Json<NotesResponse>, String> {
-        let page = read("get_all_notes", self.app.get_all_notes(p.0.body.limit()))?;
-        notes_ok("get_all_notes", NotesResponse::new(page, p.0.body.format()))
+        let page = read("get_all_notes", self.app.get_all_notes(req.body.limit()))?;
+        notes_ok("get_all_notes", NotesResponse::new(page, req.body.format()))
     }
 
     #[tool(
@@ -90,42 +97,45 @@ impl AppleNotesMCP {
     )]
     pub fn get_notes_in_folder(
         &self,
-        p: Parameters<FolderNotesRequest>,
+        Parameters(req): Parameters<FolderNotesRequest>,
     ) -> Result<Json<NotesResponse>, String> {
         let page = read(
             "get_notes_in_folder",
-            self.app.get_notes_in_folder(&p.0.folder, p.0.body.limit()),
+            self.app.get_notes_in_folder(&req.folder, req.body.limit()),
         )?;
         notes_ok(
             "get_notes_in_folder",
-            NotesResponse::new(page, p.0.body.format()),
+            NotesResponse::new(page, req.body.format()),
         )
     }
 
     #[tool(description = "Notes in one account, by exact account name. See list_accounts.")]
     pub fn get_notes_in_account(
         &self,
-        p: Parameters<AccountNotesRequest>,
+        Parameters(req): Parameters<AccountNotesRequest>,
     ) -> Result<Json<NotesResponse>, String> {
         let page = read(
             "get_notes_in_account",
             self.app
-                .get_notes_in_account(&p.0.account, p.0.body.limit()),
+                .get_notes_in_account(&req.account, req.body.limit()),
         )?;
         notes_ok(
             "get_notes_in_account",
-            NotesResponse::new(page, p.0.body.format()),
+            NotesResponse::new(page, req.body.format()),
         )
     }
 
     #[tool(description = "Files attached to a note, by exact title. Empty if it has none.")]
     pub fn get_attachments(
         &self,
-        p: Parameters<TitleRequest>,
+        Parameters(req): Parameters<TitleRequest>,
     ) -> Result<Json<AttachmentsResponse>, String> {
-        let attachments = read("get_attachments", self.app.get_note_attachments(&p.0.title))?;
-        info!(tool = "get_attachments", count = attachments.len(), "ok");
-        Ok(Json(AttachmentsResponse { attachments }))
+        let attachments = read("get_attachments", self.app.get_note_attachments(&req.title))?;
+        listed(
+            "get_attachments",
+            attachments.len(),
+            AttachmentsResponse { attachments },
+        )
     }
 
     #[tool(
@@ -134,30 +144,31 @@ impl AppleNotesMCP {
     )]
     pub fn list_folders(
         &self,
-        _p: Parameters<EmptyRequest>,
+        _: Parameters<EmptyRequest>,
     ) -> Result<Json<FoldersResponse>, String> {
         let folders = read("list_folders", self.app.list_folders())?;
-        info!(tool = "list_folders", count = folders.len(), "ok");
-        Ok(Json(FoldersResponse { folders }))
+        listed("list_folders", folders.len(), FoldersResponse { folders })
     }
 
     #[tool(description = "Subfolders of one folder, nested ones included. Empty if none.")]
     pub fn get_subfolders(
         &self,
-        p: Parameters<FolderRequest>,
+        Parameters(req): Parameters<FolderRequest>,
     ) -> Result<Json<FoldersResponse>, String> {
-        let folders = read("get_subfolders", self.app.get_subfolders(&p.0.folder))?;
-        info!(tool = "get_subfolders", count = folders.len(), "ok");
-        Ok(Json(FoldersResponse { folders }))
+        let folders = read("get_subfolders", self.app.get_subfolders(&req.folder))?;
+        listed("get_subfolders", folders.len(), FoldersResponse { folders })
     }
 
     #[tool(description = "Configured accounts: iCloud, On My Mac, Exchange, and so on.")]
     pub fn list_accounts(
         &self,
-        _p: Parameters<EmptyRequest>,
+        _: Parameters<EmptyRequest>,
     ) -> Result<Json<AccountsResponse>, String> {
         let accounts = read("list_accounts", self.app.list_accounts())?;
-        info!(tool = "list_accounts", count = accounts.len(), "ok");
-        Ok(Json(AccountsResponse { accounts }))
+        listed(
+            "list_accounts",
+            accounts.len(),
+            AccountsResponse { accounts },
+        )
     }
 }

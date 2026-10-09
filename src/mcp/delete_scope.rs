@@ -9,13 +9,13 @@ impl AppleNotesMCP {
         description = "Delete a note by exact title. iCloud moves it to Recently Deleted; \
                        in other accounts it is gone for good. Confirm first."
     )]
-    pub fn delete_note(&self, p: Parameters<TitleRequest>) -> Result<Json<WriteResponse>, String> {
-        let response = match self.app.delete_note(&p.0.title) {
-            Ok(true) => WriteResponse {
-                success: true,
-                ..Default::default()
-            },
-            Ok(false) => WriteResponse::not_found(&p.0.title),
+    pub fn delete_note(
+        &self,
+        Parameters(TitleRequest { title }): Parameters<TitleRequest>,
+    ) -> Result<Json<WriteResponse>, String> {
+        let response = match self.app.delete_note(&title) {
+            Ok(true) => WriteResponse::done(None),
+            Ok(false) => WriteResponse::not_found(&title),
             Err(error) => {
                 warn!(tool = "delete_note", %error, "delete failed");
                 WriteResponse::failed(error.to_string())
@@ -31,26 +31,14 @@ impl AppleNotesMCP {
     )]
     pub fn delete_folder(
         &self,
-        p: Parameters<FolderNameRequest>,
+        Parameters(FolderNameRequest { name }): Parameters<FolderNameRequest>,
     ) -> Result<Json<FolderWriteResponse>, String> {
-        let response = match self.app.delete_folder(&p.0.name) {
-            Ok(true) => FolderWriteResponse {
-                success: true,
-                folder: None,
-                error: None,
-            },
-            Ok(false) => FolderWriteResponse {
-                success: false,
-                folder: None,
-                error: Some(format!("No folder named {:?} was found", p.0.name)),
-            },
+        let response = match self.app.delete_folder(&name) {
+            Ok(true) => FolderWriteResponse::done(None),
+            Ok(false) => FolderWriteResponse::not_found(&name),
             Err(error) => {
                 warn!(tool = "delete_folder", %error, "delete failed");
-                FolderWriteResponse {
-                    success: false,
-                    folder: None,
-                    error: Some(error.to_string()),
-                }
+                FolderWriteResponse::failed(error.to_string())
             }
         };
         info!(tool = "delete_folder", success = response.success, "ok");
