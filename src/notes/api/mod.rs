@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow, bail};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2_foundation::NSString;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use tracing::{info, trace, warn};
 
 use super::bridge::{
@@ -110,12 +110,12 @@ impl NotesApp {
     unsafe fn find_folder(&self, folder_name: &str, prefer: Option<&str>) -> Option<FoundFolder> {
         unsafe {
             let target = NSString::from_str(folder_name);
-            let mut level: Vec<(Retained<AnyObject>, String)> = self
+            let mut level: Vec<(Retained<AnyObject>, Arc<str>)> = self
                 .accounts()
                 .map(|(account, account_name)| (obj_folders(&account), account_name))
                 .collect();
             if let Some(preferred) = prefer {
-                level.sort_by_key(|(_, account)| account != preferred);
+                level.sort_by_key(|(_, account)| &**account != preferred);
             }
             while !level.is_empty() {
                 for (arr, account) in &level {
@@ -123,14 +123,14 @@ impl NotesApp {
                         return Some(FoundFolder {
                             parent: arr.clone(),
                             index,
-                            account: account.clone(),
+                            account: Arc::clone(account),
                         });
                     }
                 }
                 let mut next = Vec::new();
                 for (arr, account) in &level {
                     for i in 0..sb_count(arr) {
-                        next.push((obj_folders(&sb_at(arr, i)), account.clone()));
+                        next.push((obj_folders(&sb_at(arr, i)), Arc::clone(account)));
                     }
                 }
                 level = next;
@@ -164,19 +164,19 @@ impl NotesApp {
     /// Every account with its name. The names are batch-fetched in one Apple
     /// Event; the accounts themselves are resolved lazily, so a caller that
     /// stops early skips the rest.
-    unsafe fn accounts(&self) -> impl Iterator<Item = (Retained<AnyObject>, String)> {
+    unsafe fn accounts(&self) -> impl Iterator<Item = (Retained<AnyObject>, Arc<str>)> {
         let accounts_arr = unsafe { app_accounts(&self.sb_app) };
         let mut names = unsafe { kvc_string_vec(&accounts_arr, keys::name()) };
         (0..names.len()).map(move |i| {
             let account = unsafe { sb_at(&accounts_arr, i) };
-            (account, take_at(&mut names, i))
+            (account, take_at(&mut names, i).into())
         })
     }
 }
 
 struct FoundNote {
     location: NoteLocation,
-    account: String,
+    account: Arc<str>,
 }
 
 /// Kept as a position in the parent's element array so it can be removed as
@@ -184,7 +184,7 @@ struct FoundNote {
 struct FoundFolder {
     parent: Retained<AnyObject>,
     index: usize,
-    account: String,
+    account: Arc<str>,
 }
 
 impl FoundFolder {

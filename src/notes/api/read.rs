@@ -52,7 +52,7 @@ impl NotesApp {
             let mut out = Vec::new();
             if let Some(found) = self.find_folder(folder_name, None) {
                 let sub_arr = obj_folders(&found.folder());
-                collect_folders(&sub_arr, &found.account, folder_name, &mut out);
+                collect_folders(&sub_arr, &found.account, &folder_name.into(), &mut out);
             }
             debug!(count = out.len(), "listed subfolders");
             Ok(out)
@@ -111,7 +111,13 @@ impl NotesApp {
             let page = NotePage::collect(limit, |ceiling, out| unsafe {
                 if let Some(found) = self.find_folder(folder_name, None) {
                     let folder = found.folder();
-                    collect_notes_in_folder(&folder, folder_name, &found.account, ceiling, out);
+                    collect_notes_in_folder(
+                        &folder,
+                        &folder_name.into(),
+                        &found.account,
+                        ceiling,
+                        out,
+                    );
                 }
             });
             debug!(count = page.notes.len(), "collected notes in folder");
@@ -127,7 +133,12 @@ impl NotesApp {
                 return Ok(NotePage::default());
             };
             let page = NotePage::collect(limit, |ceiling, out| unsafe {
-                collect_notes_in_folders(&obj_folders(&account), account_name, ceiling, out);
+                collect_notes_in_folders(
+                    &obj_folders(&account),
+                    &account_name.into(),
+                    ceiling,
+                    out,
+                );
             });
             debug!(count = page.notes.len(), "collected notes in account");
             Ok(page)
@@ -167,7 +178,7 @@ impl NotesApp {
                 return Ok(Vec::new());
             };
             let mut out = Vec::new();
-            collect_attachments(&found.location.note(), title, &mut out);
+            collect_attachments(&found.location.note(), &title.into(), &mut out);
             debug!(count = out.len(), "collected attachments");
             Ok(out)
         })

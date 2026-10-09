@@ -7,6 +7,7 @@ use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_foundation::{NSMutableDictionary, NSObject, NSString};
+use std::sync::Arc;
 use tracing::{debug, instrument};
 
 impl NotesApp {
@@ -155,14 +156,14 @@ impl NotesApp {
             let (account_obj, account_name) = match account {
                 None => {
                     let account = self.default_account()?;
-                    let name = kvc_string(&account, keys::name());
+                    let name = kvc_string(&account, keys::name()).into();
                     (account, name)
                 }
                 Some(name) => {
                     let account = self
                         .find_account(name)
                         .ok_or_else(|| anyhow!("Account {name:?} not found"))?;
-                    (account, name.to_owned())
+                    (account, name.into())
                 }
             };
 
@@ -178,8 +179,8 @@ impl NotesApp {
             let resolved = sb_at(&folders_arr, index);
             Ok(FolderInfo {
                 id: kvc_string(&resolved, keys::id()),
-                name: name.to_owned(),
-                parent: account_name.clone(),
+                name: name.into(),
+                parent: Arc::clone(&account_name),
                 account: account_name,
             })
         })

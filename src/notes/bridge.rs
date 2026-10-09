@@ -7,6 +7,7 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_foundation::NSString;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
 pub use objc2_scripting_bridge::SBApplication;
 
@@ -35,8 +36,8 @@ pub(super) unsafe fn note_info(obj: &AnyObject, folder_name: &str, account_name:
         body: unsafe { kvc_string(obj, keys::body()) },
         creation_date: unsafe { kvc_string(obj, keys::creation_date()) },
         modification_date: unsafe { kvc_string(obj, keys::modification_date()) },
-        folder: folder_name.to_owned(),
-        account: account_name.to_owned(),
+        folder: folder_name.into(),
+        account: account_name.into(),
         shared: unsafe { kvc_bool(obj, keys::shared()) },
         password_protected: unsafe { kvc_bool(obj, keys::password_protected()) },
     }
@@ -47,8 +48,8 @@ pub(super) unsafe fn note_info(obj: &AnyObject, folder_name: &str, account_name:
 /// `folders` fetch per folder.
 pub(super) unsafe fn collect_folders(
     folders_arr: &AnyObject,
-    account_name: &str,
-    parent_name: &str,
+    account_name: &Arc<str>,
+    parent_name: &Arc<str>,
     out: &mut Vec<FolderInfo>,
 ) {
     let count = unsafe { sb_count(folders_arr) };
@@ -60,12 +61,12 @@ pub(super) unsafe fn collect_folders(
 
     out.reserve(count);
     for i in 0..count {
-        let name = take_at(&mut names, i);
+        let name: Arc<str> = take_at(&mut names, i).into();
         out.push(FolderInfo {
             id: take_at(&mut ids, i),
-            name: name.clone(),
-            account: account_name.to_owned(),
-            parent: parent_name.to_owned(),
+            name: Arc::clone(&name),
+            account: Arc::clone(account_name),
+            parent: Arc::clone(parent_name),
         });
         let folder = unsafe { sb_at(folders_arr, i) };
         let sub_arr = unsafe { obj_folders(&folder) };
@@ -179,15 +180,15 @@ impl NoteColumns {
         }
     }
 
-    fn take(&mut self, i: usize, title: String, folder: &str, account: &str) -> NoteInfo {
+    fn take(&mut self, i: usize, title: String, folder: &Arc<str>, account: &Arc<str>) -> NoteInfo {
         NoteInfo {
             id: take_at(&mut self.ids, i),
             title,
             body: take_at(&mut self.bodies, i),
             creation_date: take_at(&mut self.created, i),
             modification_date: take_at(&mut self.modified, i),
-            folder: folder.to_owned(),
-            account: account.to_owned(),
+            folder: Arc::clone(folder),
+            account: Arc::clone(account),
             shared: self.shared.get(i).copied().unwrap_or_default(),
             password_protected: self.protected.get(i).copied().unwrap_or_default(),
         }
@@ -196,8 +197,8 @@ impl NoteColumns {
 
 pub(super) unsafe fn collect_notes_in_folder(
     folder: &AnyObject,
-    folder_name: &str,
-    account_name: &str,
+    folder_name: &Arc<str>,
+    account_name: &Arc<str>,
     ceiling: usize,
     out: &mut Vec<NoteInfo>,
 ) {
@@ -222,13 +223,13 @@ pub(super) unsafe fn collect_notes_in_folder(
 
 pub(super) unsafe fn collect_notes_in_folders(
     folders_arr: &AnyObject,
-    account_name: &str,
+    account_name: &Arc<str>,
     ceiling: usize,
     out: &mut Vec<NoteInfo>,
 ) {
     let _ = unsafe {
         walk_folders(folders_arr, true, &mut |folder, folder_name| {
-            collect_notes_in_folder(folder, &folder_name, account_name, ceiling, out);
+            collect_notes_in_folder(folder, &folder_name.into(), account_name, ceiling, out);
             stop_when_full(out, ceiling)
         })
     };
@@ -236,7 +237,7 @@ pub(super) unsafe fn collect_notes_in_folders(
 
 pub(super) unsafe fn collect_attachments(
     note: &AnyObject,
-    note_title: &str,
+    note_title: &Arc<str>,
     out: &mut Vec<AttachmentInfo>,
 ) {
     let arr = unsafe { obj_attachments(note) };
@@ -258,7 +259,7 @@ pub(super) unsafe fn collect_attachments(
             creation_date: take_at(&mut created, i),
             modification_date: take_at(&mut modified, i),
             url: take_at(&mut urls, i),
-            note_title: note_title.to_owned(),
+            note_title: Arc::clone(note_title),
         });
     }
 }
@@ -276,7 +277,7 @@ pub(super) struct SearchFields {
 /// scanning a large library costs one or two Apple Events per folder.
 pub(super) unsafe fn search_notes_in_folders(
     folders_arr: &AnyObject,
-    account_name: &str,
+    account_name: &Arc<str>,
     query: &str,
     fields: SearchFields,
     limit: usize,
@@ -286,7 +287,7 @@ pub(super) unsafe fn search_notes_in_folders(
         walk_folders(folders_arr, true, &mut |folder, folder_name| {
             search_notes_in_folder(
                 folder,
-                &folder_name,
+                &folder_name.into(),
                 account_name,
                 query,
                 fields,
@@ -300,8 +301,8 @@ pub(super) unsafe fn search_notes_in_folders(
 
 unsafe fn search_notes_in_folder(
     folder: &AnyObject,
-    folder_name: &str,
-    account_name: &str,
+    folder_name: &Arc<str>,
+    account_name: &Arc<str>,
     query: &str,
     fields: SearchFields,
     limit: usize,
