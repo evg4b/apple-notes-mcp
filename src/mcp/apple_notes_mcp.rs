@@ -2,13 +2,11 @@ use super::scope::ScopeSet;
 use crate::notes::NotesApp;
 use rmcp::handler::server::tool::ToolRouter;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, warn};
 
 #[derive(Clone)]
 pub struct AppleNotesMCP {
     pub(super) app: Arc<NotesApp>,
-    /// Built once at construction: `list_tools` and `call_tool` run on every
-    /// request and must not rebuild the route map.
     pub(super) router: Arc<ToolRouter<Self>>,
 }
 
@@ -60,6 +58,21 @@ impl AppleNotesMCP {
 
         router
     }
+
+    /// Apple Events block until Notes answers, sometimes for seconds, so the
+    /// call runs on the blocking pool.
+    pub(super) async fn blocking<T: Send + 'static>(
+        &self,
+        op: impl FnOnce(&NotesApp) -> T + Send + 'static,
+    ) -> Result<T, String> {
+        let app = Arc::clone(&self.app);
+        tokio::task::spawn_blocking(move || op(&app))
+            .await
+            .map_err(|error| {
+                warn!(%error, "tool call did not complete");
+                format!("Tool call did not complete: {error}")
+            })
+    }
 }
 
 #[cfg(test)]
@@ -67,6 +80,10 @@ mod tests {
     use super::*;
     use crate::mcp::Scope;
     use rmcp::serde_json::Value;
+
+    fn all_scopes() -> ScopeSet {
+        ScopeSet::from_iter([Scope::Read, Scope::Write, Scope::Delete])
+    }
 
     fn tool_names(scopes: ScopeSet) -> Vec<String> {
         AppleNotesMCP::build_router(scopes)
@@ -115,11 +132,7 @@ mod tests {
 
     #[test]
     fn full_access_registers_every_tool() {
-        let names = tool_names(ScopeSet::from_iter([
-            Scope::Read,
-            Scope::Write,
-            Scope::Delete,
-        ]));
+        let names = tool_names(all_scopes());
         assert_eq!(names.len(), 17);
         for tool in [
             "list_notes",
@@ -138,8 +151,7 @@ mod tests {
 
     #[test]
     fn every_tool_has_a_description() {
-        let scopes = ScopeSet::from_iter([Scope::Read, Scope::Write, Scope::Delete]);
-        for tool in AppleNotesMCP::build_router(scopes).list_all() {
+        for tool in AppleNotesMCP::build_router(all_scopes()).list_all() {
             let description = tool.description.as_deref().unwrap_or_default();
             assert!(!description.is_empty(), "{} has no description", tool.name);
         }
@@ -147,8 +159,7 @@ mod tests {
 
     #[test]
     fn tool_names_are_unique() {
-        let scopes = ScopeSet::from_iter([Scope::Read, Scope::Write, Scope::Delete]);
-        let mut names = tool_names(scopes);
+        let mut names = tool_names(all_scopes());
         let total = names.len();
         names.sort();
         names.dedup();
@@ -166,6 +177,15 @@ mod tests {
         Value::Object(schema)
     }
 
+    fn required(schema: &Value) -> Vec<&str> {
+        schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect()
+    }
+
     #[test]
     fn search_notes_requires_only_a_query() {
         let schema = input_schema(ScopeSet::READ, "search_notes");
@@ -173,24 +193,13 @@ mod tests {
         for field in ["query", "in_body", "limit"] {
             assert!(properties.contains_key(field), "missing {field}");
         }
-        let required: Vec<&str> = schema["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(required, ["query"]);
+        assert_eq!(required(&schema), ["query"]);
     }
 
     #[test]
     fn create_note_folder_is_not_required() {
         let schema = input_schema(ScopeSet::WRITE, "create_note");
-        let required: Vec<&str> = schema["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
+        let required = required(&schema);
         assert!(required.contains(&"title"));
         assert!(required.contains(&"content"));
         assert!(
@@ -201,8 +210,7 @@ mod tests {
 
     #[test]
     fn delete_tools_warn_they_are_permanent() {
-        let scopes = ScopeSet::from_iter([Scope::Delete]);
-        for tool in AppleNotesMCP::build_router(scopes).list_all() {
+        for tool in AppleNotesMCP::build_router(ScopeSet::DELETE).list_all() {
             let description = tool.description.as_deref().unwrap_or_default();
             assert!(
                 description.contains("Cannot be undone") || description.contains("gone for good"),
@@ -211,15 +219,13 @@ mod tests {
             );
         }
     }
-    /// Clients fetch the whole tool list once per session and many keep it in
-    /// context afterwards, so its size is a standing cost. The budget turns a
-    /// long new description into a failing test.
+
+    /// Clients keep the tool list in context, so its size is a standing cost.
     #[test]
     fn tool_list_fits_the_budget() {
         const BUDGET_BYTES: usize = 23_000;
 
-        let scopes = ScopeSet::from_iter([Scope::Read, Scope::Write, Scope::Delete]);
-        let tools = AppleNotesMCP::build_router(scopes).list_all();
+        let tools = AppleNotesMCP::build_router(all_scopes()).list_all();
         let bytes = rmcp::serde_json::to_string(&tools).unwrap().len();
         assert!(
             bytes <= BUDGET_BYTES,
@@ -232,8 +238,7 @@ mod tests {
     fn tool_descriptions_stay_short() {
         const MAX_CHARS: usize = 200;
 
-        let scopes = ScopeSet::from_iter([Scope::Read, Scope::Write, Scope::Delete]);
-        for tool in AppleNotesMCP::build_router(scopes).list_all() {
+        for tool in AppleNotesMCP::build_router(all_scopes()).list_all() {
             let description = tool.description.as_deref().unwrap_or_default();
             assert!(
                 description.len() <= MAX_CHARS,

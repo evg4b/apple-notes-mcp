@@ -6,8 +6,8 @@
 //! They require Notes.app to be installed and the test binary to hold the
 //! Automation permission for it. The write tests create and then remove notes
 //! and folders prefixed with `__apple_notes_mcp_test`. Deleted test notes land
-//! in Recently Deleted, which this server deliberately never touches, so they
-//! stay there until Notes purges them.
+//! in Recently Deleted, which this server never touches, so they stay there
+//! until Notes purges them.
 
 use super::api::NotesApp;
 
@@ -127,7 +127,7 @@ fn notes_in_account_report_that_account() {
         .unwrap()
         .notes
     {
-        assert_eq!(note.account, account.name);
+        assert_eq!(&*note.account, account.name);
     }
 }
 
@@ -274,7 +274,7 @@ fn attachments_name_their_note() {
     let titles = app.list_notes().unwrap();
     for title in titles.iter().take(20) {
         for attachment in app.get_note_attachments(title).unwrap() {
-            assert_eq!(&attachment.note_title, title);
+            assert_eq!(&*attachment.note_title, title);
             assert!(!attachment.id.is_empty(), "empty id: {attachment:?}");
         }
     }
@@ -339,13 +339,13 @@ fn folder_create_and_delete_round_trips() {
     clean(&app);
 
     let folder = app.create_folder(TEST_FOLDER, None).unwrap();
-    assert_eq!(folder.name, TEST_FOLDER);
+    assert_eq!(&*folder.name, TEST_FOLDER);
     assert!(!folder.account.is_empty(), "empty account: {folder:?}");
     assert!(
         app.list_folders()
             .unwrap()
             .iter()
-            .any(|f| f.name == TEST_FOLDER),
+            .any(|f| &*f.name == TEST_FOLDER),
         "created folder is not listed"
     );
 
@@ -363,13 +363,13 @@ fn note_is_created_in_a_folder_then_moved() {
     app.create_note(TEST_NOTE, "<div>body</div>", Some(TEST_FOLDER))
         .unwrap();
     let note = app.get_note_by_title(TEST_NOTE).unwrap().unwrap();
-    assert_eq!(note.folder, TEST_FOLDER);
+    assert_eq!(&*note.folder, TEST_FOLDER);
 
     let default_folder = app
         .list_folders()
         .unwrap()
         .into_iter()
-        .find(|f| f.name != TEST_FOLDER)
+        .find(|f| &*f.name != TEST_FOLDER)
         .expect("expected another folder to move into");
     let reported = app
         .move_note(TEST_NOTE, &default_folder.name)
@@ -455,7 +455,7 @@ fn created_folder_reports_its_own_id() {
         .list_folders()
         .unwrap()
         .into_iter()
-        .find(|f| f.name == TEST_FOLDER)
+        .find(|f| &*f.name == TEST_FOLDER)
         .expect("created folder is not listed");
     assert_eq!(created.id, listed.id, "create returned another folder's id");
     clean(&app);

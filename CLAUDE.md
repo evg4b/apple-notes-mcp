@@ -44,18 +44,30 @@ This is a macOS MCP (Model Context Protocol) server that exposes Apple Notes to 
 | `src/mcp/read_scope.rs`         | 10 read tools (`list_notes`, `get_note`, `search_notes`, …) via `#[tool]` macros             |
 | `src/mcp/write_scope.rs`        | 5 write tools (`create_note`, `append_to_note`, `move_note`, …) via `#[tool]` macros         |
 | `src/mcp/delete_scope.rs`       | 2 delete tools (`delete_note`, `delete_folder`) via `#[tool]` macros                          |
-| `src/mcp/models.rs`             | Request/response types (`serde` + `schemars` JSON Schema)                                     |
-| `src/notes/api.rs`              | `NotesApp` — all public business logic; unit tests live here                                  |
-| `src/notes/bridge.rs`           | Low-level Objective-C bridge: `SBApplication`/`SBObject` extern classes, batch-fetch helpers  |
+| `src/mcp/models/`               | Tool request (`requests.rs`) and response (`responses.rs`) types, `serde` + `schemars`        |
+| `src/notes/api/`                | `NotesApp`: shared lookups in `mod.rs`, operations split into `read.rs`, `write.rs`, `delete.rs` |
+| `src/notes/delegate.rs`         | `EventErrorDelegate`: records failed Apple Events so they become errors instead of aborting |
+| `src/notes/bridge.rs`           | Batch-fetch helpers over ScriptingBridge; `walk_folders` is the one folder walker (skips Recently Deleted) |
 | `src/notes/helpers.rs`          | KVC helpers (`kvc_string`, `kvc_index_of`, `sb_count`, …); fully unit-tested without Notes.app |
-| `src/notes/types.rs`            | Plain data types: `NoteInfo`, `FolderInfo`, `AccountInfo`, `PartialNoteInfo`                  |
+| `src/notes/html.rs`             | `to_plain_text`: HTML note body → plain text (the default body format)                        |
+| `src/notes/types.rs`            | Plain data types: `NoteInfo`, `FolderInfo`, `AccountInfo`, `PartialNoteInfo`, `NotePage`      |
 | `src/notes/integration_tests.rs` | `#[ignore]` tests requiring a live Notes.app                                                  |
 
 ### Data flow
 ```
-AI client  →(stdio JSON-RPC)→  AppleNotesMCP (rmcp)  →  NotesApp (api.rs)
+AI client  →(stdio JSON-RPC)→  AppleNotesMCP (rmcp)  →(spawn_blocking)→  NotesApp::run
   →  bridge.rs + helpers.rs  →(Apple Events via ScriptingBridge)→  Notes.app
 ```
+
+### Rules for touching Notes
+- Tools call Notes through `AppleNotesMCP::blocking`, never directly: Apple Events block, and
+  must not hold a tokio worker.
+- Every public `NotesApp` method wraps its body in `NotesApp::run`. It serializes calls (which is
+  what the `Send`/`Sync` impls rely on), drains an autorelease pool, and turns an Apple Event
+  failure recorded by `EventErrorDelegate` into an error. Without it, a failed event reads as an
+  empty result.
+- Without the delegate, ScriptingBridge raises an Objective-C exception on a failed event, which
+  aborts the process. Never construct an `SBApplication` without installing one.
 
 ### Performance pattern
 Apple Events are the bottleneck, so `bridge.rs` batches them: `valueForKey:` on an SBObject
@@ -67,6 +79,8 @@ Two supporting rules:
   instead of materialising a `Vec<String>` of every name.
 - Move batch-fetched columns into the result structs with `take_at`; never clone them, note
   bodies are the largest strings in the payload.
+- Names repeated across rows (folder, account, parent) are `Arc<str>`: build one per folder or
+  account and `Arc::clone` it into each row.
 
 ### Scopes
 `--scopes` restricts which MCP tools are registered. Scope checking happens once, in

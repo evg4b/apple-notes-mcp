@@ -18,12 +18,13 @@ strip = true           # remove symbol table and debug info
 
 [dependencies]
 anyhow = "1.0.102"
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive", "rc"] }
 rmcp = { version = "1.4.0", features = ["transport-io"] }
 tokio = { version = "1.52.0", features = ["macros", "rt-multi-thread"] }
 objc2 = "0.6.4"
 objc2-foundation = "0.3.2"
 objc2-scripting-bridge = "0.3.2"
+objc2-core-services = { version = "0.3.2", default-features = false, features = ["std", "AEDataModel"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4.6.1", features = ["derive"] }

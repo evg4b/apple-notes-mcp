@@ -353,7 +353,8 @@ Recently Deleted are never matched, so this can't permanently erase a trashed no
 ### `delete_folder`
 
 Deletes a folder by exact name, top-level or nested, **along with every note inside it**. Those
-notes do not go to Recently Deleted. This is the most destructive call in the server.
+notes do not go to Recently Deleted. This is the most destructive call in the server. Recently
+Deleted itself is refused, since deleting it would erase every trashed note for good.
 
 **Parameters:**
 

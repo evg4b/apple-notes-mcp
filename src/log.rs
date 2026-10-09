@@ -9,8 +9,6 @@ use tracing_subscriber::fmt;
 static LOG_FILE_NAME: &str = "apple-notes-mcp.log";
 static LOG_DIR: &str = "Library/Logs/apple-notes-mcp";
 
-/// `~/Library/Logs/apple-notes-mcp/apple-notes-mcp.log`, falling back to the
-/// working directory when `$HOME` is unset.
 fn default_log_path() -> PathBuf {
     match env::var_os("HOME") {
         Some(home) => PathBuf::from(home).join(LOG_DIR).join(LOG_FILE_NAME),

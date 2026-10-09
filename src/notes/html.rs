@@ -24,9 +24,8 @@ const LINE_BREAKING_TAGS: &[&str] = &[
     "h6",
 ];
 
-/// Strip the markup out of an HTML body, keeping its line structure.
 pub fn to_plain_text(html: &str) -> String {
-    let mut out = String::with_capacity(html.len() / 2);
+    let mut out = PlainText::with_capacity(html.len() / 2);
     let mut rest = html;
 
     loop {
@@ -43,15 +42,92 @@ pub fn to_plain_text(html: &str) -> String {
             break;
         };
         if breaks_line(&after_open[..close]) {
-            push_line_break(&mut out);
+            out.line_break();
         }
         rest = &after_open[close + 1..];
     }
 
-    tidy(out)
+    out.finish()
 }
 
-/// Does this tag body (the text between `<` and `>`) end the current line?
+/// Plain text tidied as it is written: each line loses its trailing
+/// whitespace when it ends, runs of blank lines collapse to one, and the ends
+/// are trimmed. Tidying on the fly keeps a body's conversion to one buffer.
+struct PlainText {
+    out: String,
+    /// Where the line being written starts in `out`.
+    line_start: usize,
+    blank_run: usize,
+    /// Whether the text written so far, before tidying, ends partway through
+    /// a line. Line-breaking tags only end a line that has started.
+    in_line: bool,
+}
+
+impl PlainText {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            out: String::with_capacity(capacity),
+            line_start: 0,
+            blank_run: 0,
+            in_line: false,
+        }
+    }
+
+    fn push_str(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        let mut lines = text.split('\n');
+        if let Some(first) = lines.next() {
+            self.out.push_str(first);
+        }
+        for line in lines {
+            self.end_line();
+            self.out.push_str(line);
+        }
+        self.in_line = !text.ends_with('\n');
+    }
+
+    fn push(&mut self, ch: char) {
+        self.push_str(ch.encode_utf8(&mut [0; 4]));
+    }
+
+    fn line_break(&mut self) {
+        if self.in_line {
+            self.end_line();
+            self.in_line = false;
+        }
+    }
+
+    fn end_line(&mut self) {
+        let line_len = self.trim_line();
+        if line_len == 0 {
+            self.blank_run += 1;
+            if self.blank_run > 1 || self.line_start == 0 {
+                return;
+            }
+        } else {
+            self.blank_run = 0;
+        }
+        self.out.push('\n');
+        self.line_start = self.out.len();
+    }
+
+    /// Drop the current line's trailing whitespace and return its length.
+    fn trim_line(&mut self) -> usize {
+        let line_len = self.out[self.line_start..].trim_end().len();
+        self.out.truncate(self.line_start + line_len);
+        line_len
+    }
+
+    fn finish(mut self) -> String {
+        self.trim_line();
+        let len = self.out.trim_end_matches('\n').len();
+        self.out.truncate(len);
+        self.out
+    }
+}
+
 fn breaks_line(tag: &str) -> bool {
     let name = tag
         .trim_start_matches('/')
@@ -63,14 +139,35 @@ fn breaks_line(tag: &str) -> bool {
         .any(|known| known.eq_ignore_ascii_case(name))
 }
 
-fn push_line_break(out: &mut String) {
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
+/// Where decoded text goes: [`PlainText`] in production, a bare `String` for
+/// the reference implementation in the tests.
+trait TextSink {
+    fn push_str(&mut self, text: &str);
+    fn push(&mut self, ch: char);
+}
+
+impl TextSink for PlainText {
+    fn push_str(&mut self, text: &str) {
+        PlainText::push_str(self, text);
+    }
+
+    fn push(&mut self, ch: char) {
+        PlainText::push(self, ch);
     }
 }
 
-/// Append `text`, resolving the HTML entities Notes actually emits.
-fn push_decoded(out: &mut String, text: &str) {
+#[cfg(test)]
+impl TextSink for String {
+    fn push_str(&mut self, text: &str) {
+        String::push_str(self, text);
+    }
+
+    fn push(&mut self, ch: char) {
+        String::push(self, ch);
+    }
+}
+
+fn push_decoded(out: &mut impl TextSink, text: &str) {
     let mut rest = text;
     loop {
         let Some(amp) = rest.find('&') else {
@@ -100,7 +197,6 @@ fn push_decoded(out: &mut String, text: &str) {
     }
 }
 
-/// Resolve the body of an entity, meaning whatever sits between `&` and `;`.
 fn decode_entity(body: &str) -> Option<char> {
     match body {
         "amp" => return Some('&'),
@@ -119,32 +215,81 @@ fn decode_entity(body: &str) -> Option<char> {
     char::from_u32(code)
 }
 
-/// Drop trailing spaces, collapse runs of blank lines, and trim the ends.
-fn tidy(text: String) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut blank_run = 0;
-    for line in text.lines() {
-        let line = line.trim_end();
-        if line.is_empty() {
-            blank_run += 1;
-            if blank_run > 1 || out.is_empty() {
-                continue;
-            }
-        } else {
-            blank_run = 0;
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    while out.ends_with('\n') {
-        out.pop();
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reference implementation: build the raw text, then tidy it into a second
+    /// buffer.
+    fn two_pass(html: &str) -> String {
+        let mut raw = String::new();
+        let mut rest = html;
+        loop {
+            let Some(open) = rest.find('<') else {
+                push_decoded(&mut raw, rest);
+                break;
+            };
+            push_decoded(&mut raw, &rest[..open]);
+            let after_open = &rest[open + 1..];
+            let Some(close) = after_open.find('>') else {
+                push_decoded(&mut raw, &rest[open..]);
+                break;
+            };
+            if breaks_line(&after_open[..close]) && !raw.is_empty() && !raw.ends_with('\n') {
+                raw.push('\n');
+            }
+            rest = &after_open[close + 1..];
+        }
+
+        let mut out = String::new();
+        let mut blank_run = 0;
+        for line in raw.lines() {
+            let line = line.trim_end();
+            if line.is_empty() {
+                blank_run += 1;
+                if blank_run > 1 || out.is_empty() {
+                    continue;
+                }
+            } else {
+                blank_run = 0;
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        while out.ends_with('\n') {
+            out.pop();
+        }
+        out
+    }
+
+    #[test]
+    fn single_pass_matches_two_pass_on_every_short_combination() {
+        const FRAGMENTS: &[&str] = &[
+            "a", " ", "\n", "\r\n", "<div>", "</div>", "<br>", "<b>", "&nbsp;", "&#10;", "  b  ",
+            "\t",
+        ];
+        let mut html = String::new();
+        let mut indices = [0usize; 4];
+        for len in 1..=indices.len() {
+            loop {
+                html.clear();
+                for &i in &indices[..len] {
+                    html.push_str(FRAGMENTS[i]);
+                }
+                assert_eq!(to_plain_text(&html), two_pass(&html), "input: {html:?}");
+
+                let Some(pos) = indices[..len]
+                    .iter()
+                    .rposition(|&i| i + 1 < FRAGMENTS.len())
+                else {
+                    break;
+                };
+                indices[pos] += 1;
+                indices[pos + 1..len].fill(0);
+            }
+            indices = [0; 4];
+        }
+    }
 
     #[test]
     fn plain_text_passes_through() {

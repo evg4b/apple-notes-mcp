@@ -9,19 +9,19 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{Json, tool};
 use tracing::{info, warn};
 
-/// Map a note write to its response, reporting the reason on failure so the
-/// client can tell "no such note" apart from "Notes refused the command".
+/// Reports the reason on failure so the client can tell "no such note" apart
+/// from "Notes refused the command".
 fn note_result(
     tool: &'static str,
     title: &str,
     result: Result<Option<PartialNoteInfo>>,
 ) -> Json<WriteResponse> {
     let response = match result {
-        Ok(Some(note)) => WriteResponse::found(note),
+        Ok(Some(note)) => WriteResponse::done(Some(note)),
         Ok(None) => WriteResponse::not_found(title),
         Err(error) => {
-            warn!(tool, %error, "write failed");
-            WriteResponse::failed(error.to_string())
+            warn!(tool, error = format!("{error:#}"), "write failed");
+            WriteResponse::failed(format!("{error:#}"))
         }
     };
     info!(tool, success = response.success, "ok");
@@ -33,15 +33,17 @@ impl AppleNotesMCP {
         description = "Create a note. content is HTML — wrap plain text in <div> tags. \
                        Without folder it lands in the default folder."
     )]
-    pub fn create_note(
+    pub async fn create_note(
         &self,
-        p: Parameters<CreateNoteRequest>,
+        Parameters(req): Parameters<CreateNoteRequest>,
     ) -> Result<Json<WriteResponse>, String> {
-        let created = self
-            .app
-            .create_note(&p.0.title, &p.0.content, p.0.folder.as_deref())
-            .map(Some);
-        Ok(note_result("create_note", &p.0.title, created))
+        self.blocking(move |app| {
+            let created = app
+                .create_note(&req.title, &req.content, req.folder.as_deref())
+                .map(Some);
+            note_result("create_note", &req.title, created)
+        })
+        .await
     }
 
     #[tool(
@@ -49,63 +51,74 @@ impl AppleNotesMCP {
                        are. new_content is HTML and replaces the whole body; read it back \
                        with get_note format=html first, or use append_to_note instead."
     )]
-    pub fn update_note(
+    pub async fn update_note(
         &self,
-        p: Parameters<UpdateNoteRequest>,
+        Parameters(req): Parameters<UpdateNoteRequest>,
     ) -> Result<Json<WriteResponse>, String> {
-        let updated = self.app.update_note(
-            &p.0.title,
-            p.0.new_title.as_deref(),
-            p.0.new_content.as_deref(),
-        );
-        Ok(note_result("update_note", &p.0.title, updated))
+        self.blocking(move |app| {
+            let updated = app.update_note(
+                &req.title,
+                req.new_title.as_deref(),
+                req.new_content.as_deref(),
+            );
+            note_result("update_note", &req.title, updated)
+        })
+        .await
     }
 
     #[tool(
         description = "Add HTML to the end of a note, keeping what is already there. \
                        Prefer this over update_note for adding a line."
     )]
-    pub fn append_to_note(
+    pub async fn append_to_note(
         &self,
-        p: Parameters<AppendNoteRequest>,
+        Parameters(req): Parameters<AppendNoteRequest>,
     ) -> Result<Json<WriteResponse>, String> {
-        let appended = self.app.append_to_note(&p.0.title, &p.0.content);
-        Ok(note_result("append_to_note", &p.0.title, appended))
+        self.blocking(move |app| {
+            let appended = app.append_to_note(&req.title, &req.content);
+            note_result("append_to_note", &req.title, appended)
+        })
+        .await
     }
 
     #[tool(
         description = "Move a note to another folder, both by exact name. Within one \
                        account it keeps its id, dates and attachments."
     )]
-    pub fn move_note(&self, p: Parameters<MoveNoteRequest>) -> Result<Json<WriteResponse>, String> {
-        let moved = self.app.move_note(&p.0.title, &p.0.folder);
-        Ok(note_result("move_note", &p.0.title, moved))
+    pub async fn move_note(
+        &self,
+        Parameters(req): Parameters<MoveNoteRequest>,
+    ) -> Result<Json<WriteResponse>, String> {
+        self.blocking(move |app| {
+            let moved = app.move_note(&req.title, &req.folder);
+            note_result("move_note", &req.title, moved)
+        })
+        .await
     }
 
     #[tool(
         description = "Create a top-level folder, in the default account unless account \
                        says otherwise. Nested folders are not supported."
     )]
-    pub fn create_folder(
+    pub async fn create_folder(
         &self,
-        p: Parameters<CreateFolderRequest>,
+        Parameters(req): Parameters<CreateFolderRequest>,
     ) -> Result<Json<FolderWriteResponse>, String> {
-        let response = match self.app.create_folder(&p.0.name, p.0.account.as_deref()) {
-            Ok(folder) => FolderWriteResponse {
-                success: true,
-                folder: Some(folder),
-                error: None,
-            },
-            Err(error) => {
-                warn!(tool = "create_folder", %error, "write failed");
-                FolderWriteResponse {
-                    success: false,
-                    folder: None,
-                    error: Some(error.to_string()),
+        self.blocking(move |app| {
+            let response = match app.create_folder(&req.name, req.account.as_deref()) {
+                Ok(folder) => FolderWriteResponse::done(Some(folder)),
+                Err(error) => {
+                    warn!(
+                        tool = "create_folder",
+                        error = format!("{error:#}"),
+                        "write failed"
+                    );
+                    FolderWriteResponse::failed(format!("{error:#}"))
                 }
-            }
-        };
-        info!(tool = "create_folder", success = response.success, "ok");
-        Ok(Json(response))
+            };
+            info!(tool = "create_folder", success = response.success, "ok");
+            Json(response)
+        })
+        .await
     }
 }
