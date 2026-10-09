@@ -91,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    fn write_scope_does_not_leak_read_or_delete_tools() {
+    fn write_scope_registers_only_write_tools() {
         let names = tool_names(ScopeSet::WRITE);
         assert_eq!(
             names,
@@ -193,27 +193,29 @@ mod tests {
             .collect();
         assert!(required.contains(&"title"));
         assert!(required.contains(&"content"));
-        assert!(!required.contains(&"folder"), "folder should be optional");
+        assert!(
+            !required.contains(&"folder"),
+            "folder is required: {required:?}"
+        );
     }
 
     #[test]
-    fn destructive_tools_warn_in_their_description() {
+    fn delete_tools_warn_they_are_permanent() {
         let scopes = ScopeSet::from_iter([Scope::Delete]);
         for tool in AppleNotesMCP::build_router(scopes).list_all() {
             let description = tool.description.as_deref().unwrap_or_default();
             assert!(
                 description.contains("Cannot be undone") || description.contains("gone for good"),
-                "{} does not warn that it is destructive",
+                "{} does not say the deletion is permanent",
                 tool.name
             );
         }
     }
-    /// Every client pays for the whole tool list on every session, and many
-    /// keep it in context for every turn afterwards. It is the one payload
-    /// whose size is entirely our choice, so hold it to a budget: a verbose new
-    /// tool description should have to be argued for, not slip in unnoticed.
+    /// Clients fetch the whole tool list once per session and many keep it in
+    /// context afterwards, so its size is a standing cost. The budget turns a
+    /// long new description into a failing test.
     #[test]
-    fn the_tool_list_stays_within_its_budget() {
+    fn tool_list_fits_the_budget() {
         const BUDGET_BYTES: usize = 23_000;
 
         let scopes = ScopeSet::from_iter([Scope::Read, Scope::Write, Scope::Delete]);
@@ -221,13 +223,13 @@ mod tests {
         let bytes = rmcp::serde_json::to_string(&tools).unwrap().len();
         assert!(
             bytes <= BUDGET_BYTES,
-            "tools/list is {bytes} bytes, over the {BUDGET_BYTES} budget — \
-             trim a description or a schema rather than raising the ceiling"
+            "tools/list is {bytes} bytes, over the {BUDGET_BYTES} budget. \
+             Trim a description or a schema before raising the ceiling."
         );
     }
 
     #[test]
-    fn no_single_tool_description_runs_long() {
+    fn tool_descriptions_stay_short() {
         const MAX_CHARS: usize = 200;
 
         let scopes = ScopeSet::from_iter([Scope::Read, Scope::Write, Scope::Delete]);

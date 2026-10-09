@@ -271,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn search_defaults_to_body_search_and_the_standard_limit() {
+    fn search_without_options_uses_defaults() {
         let request: SearchRequest = parse(json!({ "query": "budget" }));
         assert!(request.in_body());
         assert_eq!(request.body.limit(), DEFAULT_NOTE_LIMIT);
@@ -288,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn search_accepts_a_zero_limit() {
+    fn zero_limit_is_accepted() {
         let request: SearchRequest = parse(json!({ "query": "x", "limit": 0 }));
         assert_eq!(request.body.limit(), 0);
     }
@@ -322,16 +322,25 @@ mod tests {
         let value = to_value(WriteResponse::found(note)).unwrap();
         assert_eq!(value["success"], json!(true));
         assert_eq!(value["note"]["id"], json!("x-coredata://1"));
-        assert!(value.get("error").is_none(), "error leaked into success");
+        assert!(
+            value.get("error").is_none(),
+            "a successful write carried an error: {value}"
+        );
     }
 
     #[test]
     fn not_found_write_names_the_missing_note() {
         let value = to_value(WriteResponse::not_found("Shopping list")).unwrap();
         assert_eq!(value["success"], json!(false));
-        assert!(value.get("note").is_none(), "note leaked into failure");
+        assert!(
+            value.get("note").is_none(),
+            "a failed write carried a note: {value}"
+        );
         let error = value["error"].as_str().unwrap();
-        assert!(error.contains("Shopping list"), "unhelpful error: {error}");
+        assert!(
+            error.contains("Shopping list"),
+            "error does not name the missing note: {error}"
+        );
     }
 
     #[test]
@@ -342,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn default_write_response_is_an_unexplained_failure() {
+    fn default_write_response_is_a_failure() {
         let value = to_value(WriteResponse::default()).unwrap();
         assert_eq!(value["success"], json!(false));
         assert!(value.get("note").is_none());
@@ -361,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_collection_responses_serialize_as_empty_arrays() {
+    fn empty_collections_serialize_as_arrays() {
         assert_eq!(
             to_value(NotesResponse::default()).unwrap(),
             json!({ "notes": [] })
@@ -386,36 +395,35 @@ mod tests {
         r#"<li>Book the review</li><li>Send it round</li></ul></div>"#,
     );
 
-    #[test]
-    fn text_bodies_are_a_fraction_of_the_html() {
+    /// One note of `REALISTIC_BODY`, rendered the way a tool call would.
+    fn rendered(format: BodyFormat) -> NotesResponse {
         let page = NotePage {
             notes: vec![note_with_body(REALISTIC_BODY)],
             truncated: false,
         };
-        let as_html = to_value(NotesResponse::new(
-            NotePage {
-                notes: vec![note_with_body(REALISTIC_BODY)],
-                truncated: false,
-            },
-            BodyFormat::Html,
-        ))
-        .unwrap()
-        .to_string();
-        let as_text = to_value(NotesResponse::new(page, BodyFormat::Text))
-            .unwrap()
-            .to_string();
+        NotesResponse::new(page, format)
+    }
 
-        let body_html = REALISTIC_BODY.len();
+    fn rendered_json(format: BodyFormat) -> String {
+        to_value(rendered(format)).unwrap().to_string()
+    }
+
+    #[test]
+    fn text_format_shrinks_the_payload() {
+        let as_html = rendered_json(BodyFormat::Html);
+        let as_text = rendered_json(BodyFormat::Text);
+
         let body_text = crate::notes::to_plain_text(REALISTIC_BODY).len();
         assert!(
-            body_text * 2 < body_html,
-            "expected the body to more than halve: {body_text} vs {body_html}"
+            body_text * 2 < REALISTIC_BODY.len(),
+            "body went from {} to {body_text} chars; expected at least half off",
+            REALISTIC_BODY.len()
         );
         assert!(
             as_text.len() * 10 < as_html.len() * 7,
-            "expected the whole payload to shrink by ~30%: {} vs {}",
-            as_text.len(),
-            as_html.len()
+            "payload went from {} to {} bytes; expected at least 30% off",
+            as_html.len(),
+            as_text.len()
         );
         assert!(as_text.contains("Owner & reviewer: Sam"));
         assert!(!as_text.contains("<div>"));
@@ -423,16 +431,11 @@ mod tests {
 
     #[test]
     fn html_format_leaves_the_body_untouched() {
-        let page = NotePage {
-            notes: vec![note_with_body(REALISTIC_BODY)],
-            truncated: false,
-        };
-        let response = NotesResponse::new(page, BodyFormat::Html);
-        assert_eq!(response.notes[0].body, REALISTIC_BODY);
+        assert_eq!(rendered(BodyFormat::Html).notes[0].body, REALISTIC_BODY);
     }
 
     #[test]
-    fn a_full_page_reports_that_it_was_truncated() {
+    fn truncated_page_sets_the_flag() {
         let page = NotePage {
             notes: vec![note_with_body("a"), note_with_body("b")],
             truncated: true,
@@ -442,19 +445,22 @@ mod tests {
     }
 
     #[test]
-    fn an_untruncated_page_omits_the_flag() {
+    fn untruncated_page_omits_the_flag() {
         let value = to_value(NotesResponse::default()).unwrap();
         assert!(
             value.get("truncated").is_none(),
-            "a false flag should not be sent: {value}"
+            "truncated=false was serialized: {value}"
         );
     }
 
     #[test]
-    fn unset_flags_are_left_out_of_a_note() {
+    fn false_note_flags_are_omitted() {
         let value = to_value(note_with_body("x")).unwrap();
-        assert!(value.get("shared").is_none(), "false bools cost tokens");
-        assert!(value.get("password_protected").is_none());
+        assert!(value.get("shared").is_none(), "shared=false sent: {value}");
+        assert!(
+            value.get("password_protected").is_none(),
+            "password_protected=false sent: {value}"
+        );
     }
 
     fn note_with_body(body: &str) -> NoteInfo {

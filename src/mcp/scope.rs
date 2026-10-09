@@ -67,7 +67,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicates_are_idempotent() {
+    fn repeating_a_scope_is_a_no_op() {
         let once = ScopeSet::from_iter([Scope::Write]);
         let twice = ScopeSet::from_iter([Scope::Write, Scope::Write]);
         assert_eq!(once, twice);

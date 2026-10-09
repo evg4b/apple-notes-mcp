@@ -53,7 +53,7 @@ fn folders_carry_account_and_parent() {
 
 #[test]
 #[ignore = "requires Notes.app with Automation permission"]
-fn subfolders_are_nested_under_their_parent() {
+fn subfolders_share_their_parents_account() {
     let app = app();
     let folders = app.list_folders().unwrap();
     let top = folders.first().expect("expected at least one folder");
@@ -70,17 +70,20 @@ fn subfolders_of_missing_folder_are_empty() {
 
 #[test]
 #[ignore = "requires Notes.app with Automation permission"]
-fn note_titles_are_listed() {
+fn list_notes_returns_titles() {
     assert!(!app().list_notes().unwrap().is_empty());
 }
 
 #[test]
 #[ignore = "requires Notes.app with Automation permission"]
-fn all_notes_are_fully_populated() {
+fn notes_come_back_with_every_field_set() {
     let notes = app().get_all_notes(LIMIT).unwrap().notes;
     let first = notes.first().expect("expected at least one note");
     assert!(!first.id.is_empty(), "empty id: {first:?}");
-    assert!(!first.creation_date.is_empty(), "empty created: {first:?}");
+    assert!(
+        !first.creation_date.is_empty(),
+        "empty creation_date: {first:?}"
+    );
     assert!(!first.folder.is_empty(), "empty folder: {first:?}");
     assert!(!first.account.is_empty(), "empty account: {first:?}");
 }
@@ -148,7 +151,7 @@ fn notes_in_missing_folder_or_account_are_empty() {
 
 #[test]
 #[ignore = "requires Notes.app with Automation permission"]
-fn search_finds_a_note_by_a_fragment_of_its_title() {
+fn search_matches_part_of_a_title() {
     let app = app();
     clean(&app);
     app.create_note(TEST_NOTE, "<div>haystack</div>", None)
@@ -160,7 +163,7 @@ fn search_finds_a_note_by_a_fragment_of_its_title() {
         .notes;
     assert!(
         hits.iter().any(|n| n.title == TEST_NOTE),
-        "search missed the note it should have found"
+        "search for a title fragment did not return {TEST_NOTE}"
     );
 
     clean(&app);
@@ -168,7 +171,7 @@ fn search_finds_a_note_by_a_fragment_of_its_title() {
 
 #[test]
 #[ignore = "requires Notes.app with Automation permission"]
-fn search_is_case_insensitive_and_can_match_bodies() {
+fn search_ignores_case_and_can_match_bodies() {
     let app = app();
     clean(&app);
     app.create_note(TEST_NOTE, "<div>Distinctive Haystack Token</div>", None)
@@ -199,7 +202,7 @@ fn search_respects_the_limit() {
 
 #[test]
 #[ignore = "requires Notes.app with Automation permission"]
-fn a_bulk_read_stops_at_the_limit_and_says_so() {
+fn bulk_read_stops_at_the_limit() {
     let app = app();
     let all = app.get_all_notes(LIMIT).unwrap();
     assert!(!all.truncated, "library is larger than the test limit");
@@ -207,18 +210,25 @@ fn a_bulk_read_stops_at_the_limit_and_says_so() {
     let page = app.get_all_notes(1).unwrap();
     if all.notes.len() > 1 {
         assert_eq!(page.notes.len(), 1);
-        assert!(page.truncated, "a cut-off page should say it was cut off");
+        assert!(
+            page.truncated,
+            "limit 1 of {} notes, truncated not set",
+            all.notes.len()
+        );
     }
 }
 
 #[test]
 #[ignore = "requires Notes.app with Automation permission"]
-fn an_exact_fit_is_not_reported_as_truncated() {
+fn exact_fit_is_not_truncated() {
     let app = app();
     let total = app.get_all_notes(LIMIT).unwrap().notes.len();
     let page = app.get_all_notes(total).unwrap();
     assert_eq!(page.notes.len(), total);
-    assert!(!page.truncated, "an exact fit is not truncated");
+    assert!(
+        !page.truncated,
+        "limit {total} of {total} notes, truncated set"
+    );
 }
 
 #[test]
@@ -280,7 +290,7 @@ fn create_then_delete_round_trips() {
     assert!(!created.id.is_empty());
 
     let fetched = app.get_note_by_title(TEST_NOTE).unwrap();
-    assert!(fetched.is_some(), "created note was not readable back");
+    assert!(fetched.is_some(), "{TEST_NOTE} was created but not found");
 
     assert!(app.delete_note(TEST_NOTE).unwrap());
     assert!(app.get_note_by_title(TEST_NOTE).unwrap().is_none());
@@ -297,7 +307,7 @@ fn update_renames_and_replaces_the_body() {
     let updated = app
         .update_note(TEST_NOTE, Some(RENAMED_NOTE), Some("<div>updated</div>"))
         .unwrap();
-    assert!(updated.is_some(), "update reported no such note");
+    assert!(updated.is_some(), "update did not find {TEST_NOTE}");
 
     let note = app.get_note_by_title(RENAMED_NOTE).unwrap().unwrap();
     assert!(note.body.contains("updated"), "body not replaced: {note:?}");
@@ -345,7 +355,7 @@ fn folder_create_and_delete_round_trips() {
 
 #[test]
 #[ignore = "requires Notes.app with Automation permission"]
-fn note_can_be_created_in_and_moved_between_folders() {
+fn note_is_created_in_a_folder_then_moved() {
     let app = app();
     clean(&app);
     app.create_folder(TEST_FOLDER, None).unwrap();
@@ -453,7 +463,7 @@ fn created_folder_reports_its_own_id() {
 
 #[test]
 #[ignore = "requires Notes.app with Automation permission"]
-fn deleted_notes_are_out_of_reach_of_every_title_lookup() {
+fn deleted_notes_are_not_found_by_title() {
     let app = app();
     clean(&app);
     app.create_note(TEST_NOTE, "<div>body</div>", None).unwrap();

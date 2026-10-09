@@ -54,7 +54,7 @@ pub fn to_plain_text(html: &str) -> String {
     tidy(out)
 }
 
-/// Does this tag body — the text between `<` and `>` — end the current line?
+/// Does this tag body (the text between `<` and `>`) end the current line?
 fn breaks_line(tag: &str) -> bool {
     let name = tag
         .trim_start_matches('/')
@@ -103,7 +103,7 @@ fn push_decoded(out: &mut String, text: &str) {
     }
 }
 
-/// Resolve the body of an entity — what sits between `&` and `;`.
+/// Resolve the body of an entity, meaning whatever sits between `&` and `;`.
 fn decode_entity(body: &str) -> Option<char> {
     match body {
         "amp" => return Some('&'),
@@ -155,12 +155,12 @@ mod tests {
     }
 
     #[test]
-    fn tags_are_stripped_but_their_text_is_kept() {
+    fn strips_tags_keeps_text() {
         assert_eq!(to_plain_text("<b>Hello</b> <i>world</i>"), "Hello world");
     }
 
     #[test]
-    fn each_div_becomes_its_own_line() {
+    fn div_starts_a_new_line() {
         assert_eq!(
             to_plain_text("<div>one</div><div>two</div><div>three</div>"),
             "one\ntwo\nthree"
@@ -173,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn list_items_land_on_separate_lines() {
+    fn list_items_get_their_own_lines() {
         assert_eq!(
             to_plain_text("<ul><li>milk</li><li>eggs</li></ul>"),
             "milk\neggs"
@@ -181,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn attributes_do_not_leak_into_the_text() {
+    fn attributes_are_dropped() {
         assert_eq!(
             to_plain_text(r#"<div style="font-family: 'Helvetica'; color: #ff0000">red</div>"#),
             "red"
@@ -189,12 +189,12 @@ mod tests {
     }
 
     #[test]
-    fn a_tag_name_is_matched_regardless_of_case() {
+    fn tag_names_match_any_case() {
         assert_eq!(to_plain_text("<DIV>one</DIV><BR/>two"), "one\ntwo");
     }
 
     #[test]
-    fn self_closing_tags_are_recognised() {
+    fn self_closing_br_breaks_the_line() {
         assert_eq!(to_plain_text("one<br />two"), "one\ntwo");
     }
 
@@ -204,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn runs_of_blank_lines_collapse_to_one() {
+    fn blank_line_runs_collapse() {
         assert_eq!(
             to_plain_text("<div>one</div><div><br></div><div><br></div><div>two</div>"),
             "one\ntwo"
@@ -212,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn leading_and_trailing_blank_lines_are_dropped() {
+    fn outer_blank_lines_are_trimmed() {
         assert_eq!(
             to_plain_text("<div><br></div><div>body</div><br><br>"),
             "body"
@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn non_breaking_spaces_become_ordinary_spaces() {
+    fn nbsp_becomes_a_space() {
         assert_eq!(to_plain_text("a&nbsp;b"), "a b");
     }
 
@@ -241,13 +241,13 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_ampersand_survives() {
+    fn bare_ampersand_is_kept() {
         assert_eq!(to_plain_text("Tom & Jerry"), "Tom & Jerry");
         assert_eq!(to_plain_text("a &notanentity; b"), "a &notanentity; b");
     }
 
     #[test]
-    fn an_unterminated_tag_is_treated_as_text() {
+    fn unterminated_tag_is_text() {
         assert_eq!(
             to_plain_text("2 < 3 and that is true"),
             "2 < 3 and that is true"
@@ -261,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn unicode_survives_the_round_trip() {
+    fn unicode_is_preserved() {
         assert_eq!(
             to_plain_text("<div>Заметка 📝 café</div>"),
             "Заметка 📝 café"
@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn a_realistic_note_body_shrinks_substantially() {
+    fn realistic_body_shrinks_by_two_thirds() {
         let html = concat!(
             r#"<div><h1>Shopping list</h1></div><div><br></div>"#,
             r#"<div><ul class="Apple-dash-list"><li>milk</li><li>eggs</li>"#,
@@ -280,7 +280,7 @@ mod tests {
         assert_eq!(text, "Shopping list\nmilk\neggs\nbutter\nBefore Friday");
         assert!(
             text.len() * 3 < html.len(),
-            "expected a large reduction, got {} from {}",
+            "{} chars of text from {} of HTML; expected at least a 3x cut",
             text.len(),
             html.len()
         );
